@@ -1,8 +1,13 @@
 # GA Workbench
 
+> **Note for human readers**: this file is the project constitution for AI coding agents working in this repository (Claude Code, Cursor, etc). It captures non-negotiable rules and the mental model assistants should adopt when contributing. Human contributors should also read [README.md](./README.md) and [docs/PRD.md](./docs/PRD.md).
+
 GenericAgent 的本地桌面工作台。让重度用户能多 session 并行、审批高风险动作、快捷查看与恢复历史会话。
 
-PRD: https://www.notion.so/3592aab6e9138117b0c1fa9937302574
+- 产品定义（PRD v0.2）：[docs/PRD.md](./docs/PRD.md)
+- 设计系统（DESIGN.md，draft）：[docs/DESIGN.md](./docs/DESIGN.md)
+- IPC 契约：[docs/ipc-protocol.md](./docs/ipc-protocol.md)
+- 决策叙事 / 历史：[docs/devlog/](./docs/devlog/)
 
 ## 项目宪法（Non-invasive）
 
@@ -13,11 +18,11 @@ PRD: https://www.notion.so/3592aab6e9138117b0c1fa9937302574
 - 不覆盖 GA 的 venv / PATH / 环境变量
 - 不 monkey-patch `agent_runner_loop` 或 `do_*` 工具实现
 
-允许的接入方式（PRD 附录 A.2）：
+允许的接入方式（详见 PRD 附录 A.2）：
 
 - 启动 GA 子进程（每个 session 独立）
 - 注册 `agent._turn_end_hooks`（GA 官方扩展点，主链路）
-- 子类化 `BaseHandler` / `GenericAgentHandler`（仅审批拦截 `tool_before_callback`）
+- 子类化 `GenericAgentHandler` 重写 `dispatch`（仅审批拦截，前置加门，不复刻原逻辑）
 - 读 / 注入 `llmclient.backend.history`（用于历史恢复）
 
 GA 升级时，Workbench 只依赖 `BaseHandler` / `ToolClient` 这一层公开 API。
@@ -28,7 +33,7 @@ GA 升级时，Workbench 只依赖 `BaseHandler` / `ToolClient` 这一层公开 
 
 - 来源：用户本地 `~/Documents/GenericAgent` 当前 HEAD（2026-04-29）
 - 选用户实际在跑的版本，避免 upstream 新 commit 引入未验证的接口变化
-- upstream main 后续如有重要修复，用户主动 `git pull` 后再升 baseline 并重跑 smoke test
+- upstream main 后续如有重要修复，由用户主动 `git pull` 后再升 baseline 并重跑 smoke test
 
 CI smoke test 验证：
 
@@ -39,34 +44,34 @@ CI smoke test 验证：
 ## 目录结构
 
 ```
-genericagent-webui/
-├── CLAUDE.md             # 本文件
-├── bridge/               # Python，桥接 GA 子进程
-│   ├── workbench_bridge.py   # 入口：import GA、注册 hook、stdin/stdout JSON Lines
-│   ├── handlers.py           # WorkbenchHandler 子类（审批拦截）
-│   ├── ipc.py                # IPC 事件 / 命令 dataclass
-│   └── tests/                # pytest，必须脱离桌面端独立可跑
-├── desktop/              # Tauri + React + shadcn（阶段 2 才建）
+genericagent-workbench/
+├── README.md                # 项目门面
+├── LICENSE                  # MIT
+├── CLAUDE.md                # 本文件，AI agent 协作规范
+├── pyproject.toml
+├── bridge/                  # Python，桥接 GA 子进程
+│   ├── workbench_bridge.py  # 入口：import GA、注册 hook、stdin/stdout JSON Lines
+│   ├── handlers.py          # WorkbenchHandler 子类（审批拦截）
+│   ├── ipc.py               # IPC 事件 / 命令 dataclass
+│   └── tests/               # pytest，必须脱离桌面端独立可跑
+├── desktop/                 # Tauri + React + shadcn（阶段 2 才建）
 └── docs/
-    └── ipc-protocol.md   # IPC 契约文档（bridge 改先改文档）
+    ├── PRD.md               # 产品定义（v0.2）
+    ├── DESIGN.md            # 设计系统（v0.2 draft，工作中）
+    ├── ipc-protocol.md      # IPC 契约（bridge ↔ desktop）
+    └── devlog/              # 决策叙事 / 历史
+        ├── README.md        # 时间线索引
+        └── YYYY-MM-DD-topic.md
 ```
 
 ## 阶段推进
 
 | 阶段 | 状态 | 目标 |
 |---|---|---|
-| 0. 基础设施 | ✅ 完成 | git init、目录、CLAUDE.md |
-| 1. Bridge POC | 🟢 **当前** | 把 IPC 协议从草案变成事实；脱离 UI 跑通 |
-| 2. 桌面端骨架 | ⏸ 阶段 1 后 | Tauri + React、SQLite schema、子进程管理 |
-| 3. V0.1 六件事 | ⏸ 阶段 2 后 | Attach / 多 session / Tool Timeline / Approval / 历史恢复 / Session Row（Projects 最后） |
-
-## 阶段 1 完成标志
-
-`python -m bridge.tests.test_e2e` 跑通完整流程：
-
-启动 bridge → 发 user message → 收 turn_end 事件 → 触发审批 → 用户决策 → agent 接续 → 收最终回答。
-
-**没有任何 UI**。能脱离 desktop 端 100% 验证 IPC 协议。
+| 0. 基础设施 | ✅ 完成 | git init、目录、CLAUDE.md、LICENSE、README |
+| 1. Bridge POC | ✅ 完成 | IPC 协议、WorkbenchHandler、主入口、e2e |
+| 2. 桌面端骨架 | ⏸ DESIGN 讨论中 | Tauri + React + shadcn、SQLite schema、Session Manager |
+| 3. V0.1 六件事 | ⏸ 阶段 2 后 | Attach / 多 session / Tool Timeline / Approval / 历史恢复 / Session Row 状态 |
 
 ## 工程规范
 
@@ -96,15 +101,43 @@ genericagent-webui/
 
 文档先行；协议是 bridge 和 desktop 之间的契约，不能用代码隐式定义。
 
-## 设计文档暂缓
+## Devlog Workflow
 
-DESIGN.md 暂未确认。所有视觉 / 交互设计决策推到阶段 2。阶段 1 不做任何 UI 假设。
+`docs/devlog/` 是决策叙事日志，补充于 PRD（产品定义"现在是什么"）、DESIGN.md（设计规则"现在的规则"）、CLAUDE.md（项目宪法）。devlog 记录"我们怎么走到这里的"、考虑过但被否的方案、留待后续的 open question。
 
-PRD 第 13 / 15 节是方向性约束（calm control center、交互三原则），不是终态。
+### 何时写
 
-## 相关链接
+主动写 devlog 的三种场合：
 
-- PRD v0.2: https://www.notion.so/3592aab6e9138117b0c1fa9937302574
-- GA 飞书体验设计: https://www.notion.so/3502aab6e91381bfba72fe0f3a048558
-- GA upstream: https://github.com/lsdefine/GenericAgent
-- 本地 GA: `~/Documents/GenericAgent`
+1. **每次 work session 结束**（"今天先到这里"）
+2. **重大设计/架构决策对齐后**（不一定等 session 结束）
+3. **阶段切换**（如 Stage 1 → Stage 2，写一份阶段总结）
+
+### 文件命名
+
+`YYYY-MM-DD-topic-in-kebab-case.md`，一天可多个 entry（按主题分）。
+
+### 6 段格式
+
+每个 entry 包含：
+
+- **Date / Status / Related** — 元信息（含 PRD/DESIGN/commit 引用）
+- **Context** — 这次讨论或工作的背景
+- **Decisions** — 对齐的具体结论，列表化、可索引
+- **Rejected alternatives** — 考虑过但没选的方案 + 理由（最有价值的部分）
+- **Open questions** — 留待后续的问题
+- **Next** — 这次工作的下一步
+
+### 责任分工
+
+- AI 主写：每次决策对齐后主动提议落 devlog
+- 作者 review：可以 inline 调整
+- **不重复信息**：devlog 不复述 PRD / DESIGN.md / CLAUDE.md 已有的内容，只记叙事 + decision provenance
+
+写完后更新 `docs/devlog/README.md` 时间线索引。
+
+## 设计文档状态
+
+DESIGN.md v0.2 正在迭代中（基础已对齐：Light-first 色板 / 字体 / Sidebar / Tool callout / Conversation / Composer / Approval Dock / Top Bar / Inspector）。剩下的（Onboarding / Settings / Card 类）讨论完后一次性写到 [docs/DESIGN.md](./docs/DESIGN.md) 作为 v0.2 完整版。
+
+阶段 2 桌面端骨架启动前，DESIGN.md v0.2 必须完成。
