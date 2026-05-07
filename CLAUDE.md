@@ -1,8 +1,8 @@
-# GA Workbench
+# GenericAgent Workbench
 
 > **Note for human readers**: this file is the project constitution for AI coding agents working in this repository (Claude Code, Cursor, etc). It captures non-negotiable rules and the mental model assistants should adopt when contributing. Human contributors should also read [README.md](./README.md) and [docs/PRD.md](./docs/PRD.md).
 
-GenericAgent 的本地桌面工作台。让重度用户能多 session 并行、审批高风险动作、快捷查看与恢复历史会话。
+GenericAgent 的本地桌面工作台（简称 **GA Workbench**）。让重度用户能多 session 并行、审批高风险动作、快捷查看与恢复历史会话。
 
 - 产品定义（PRD v0.2）：[docs/PRD.md](./docs/PRD.md)
 - 设计系统（DESIGN.md，draft）：[docs/DESIGN.md](./docs/DESIGN.md)

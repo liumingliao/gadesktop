@@ -1,4 +1,4 @@
-# GA Workbench PRD v0.2
+# GenericAgent Workbench PRD v0.2
 
 > 创建时间：2026-05-07 CST
 > 状态：Draft v0.2
@@ -16,7 +16,7 @@
 
 ## 1. 一句话定位
 
-GA Workbench 是 GenericAgent 的本地桌面工作台，为 GA 提供 IM 与官方前端做不到的三件事：**多 session 并行、高风险动作审批、历史会话快捷查看与恢复**。
+GenericAgent Workbench（简称 **GA Workbench**）是 GenericAgent 的本地桌面工作台，为 GA 提供 IM 与官方前端做不到的三件事：**多 session 并行、高风险动作审批、历史会话快捷查看与恢复**。
 
 ## 2. 产品摘要
 

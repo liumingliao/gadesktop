@@ -1,7 +1,7 @@
 [project]
 name = "ga-workbench-bridge"
 version = "0.1.0"
-description = "GA Workbench bridge: JSON Lines IPC between GenericAgent subprocesses and the desktop frontend."
+description = "GenericAgent Workbench bridge: JSON Lines IPC between GenericAgent subprocesses and the desktop frontend."
 requires-python = ">=3.10"
 dependencies = []
 

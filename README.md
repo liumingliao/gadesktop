@@ -1,6 +1,6 @@
-# GA Workbench
+# GenericAgent Workbench
 
-> GenericAgent 的本地桌面工作台。
+> [GenericAgent](https://github.com/lsdefine/GenericAgent) 的本地桌面工作台，简称 **GA Workbench**。
 > 为重度用户提供 IM 与 GA 自带前端做不到的三件事：
 > **多 session 并行、高风险动作审批、历史会话快捷查看与恢复**。
 

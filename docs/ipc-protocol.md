@@ -1,6 +1,6 @@
 # IPC Protocol v0.1
 
-GA Workbench bridge 与 desktop 之间的通信契约。本文件是**唯一真相**——bridge 与 desktop 实现必须以本文件为准；改协议先改本文件。
+GenericAgent Workbench (GA Workbench) bridge 与 desktop 之间的通信契约。本文件是**唯一真相**——bridge 与 desktop 实现必须以本文件为准；改协议先改本文件。
 
 ## 1. Overview
 

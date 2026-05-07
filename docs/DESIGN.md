@@ -1,4 +1,4 @@
-# GA Workbench DESIGN.md
+# GenericAgent Workbench DESIGN.md
 
 > Status: **Draft v0.2 — work in progress**
 > Last updated: 2026-05-07
