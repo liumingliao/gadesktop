@@ -1,13 +1,20 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
+import { ToastHost } from "@/components/error-card/ToastHost";
 import { Inspector } from "@/components/inspector/Inspector";
 import { AppShell } from "@/components/layout/AppShell";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { TopBar } from "@/components/layout/TopBar";
+import { CommandPalette } from "@/components/overlay/CommandPalette";
 import { EmptyState } from "@/components/screens/EmptyState";
 import { MainView } from "@/components/screens/MainView";
 import { Onboarding } from "@/components/screens/onboarding/Onboarding";
+import {
+  Settings,
+  type ApprovalConfig,
+} from "@/components/screens/settings/Settings";
 import { cn } from "@/lib/utils";
+import { type AppError, makeAppError } from "@/types/app-error";
 import type {
   AgentTurn,
   ConversationToolEvent,
@@ -38,7 +45,42 @@ function App() {
   const [approvalDecisions, setApprovalDecisions] = useState<
     Record<string, ApprovalDecision>
   >({});
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [inspectorVisible, setInspectorVisible] = useState(true);
+  const [toasts, setToasts] = useState<AppError[]>([]);
+  const [approvalConfig, setApprovalConfig] =
+    useState<ApprovalConfig>(DEMO_APPROVAL_CONFIG);
   const llmDisplayName = "Claude Sonnet 4.5";
+
+  // Global keyboard shortcuts: ⌘K open palette, ⌘, open settings,
+  // ⌘E toggle inspector, ⌘N new chat. Esc is handled by Radix Dialog
+  // (Settings) and cmdk (CommandPalette) themselves.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!e.metaKey && !e.ctrlKey) return;
+      if (e.key === "k" || e.key === "K") {
+        e.preventDefault();
+        setPaletteOpen((v) => !v);
+      } else if (e.key === ",") {
+        e.preventDefault();
+        setSettingsOpen(true);
+      } else if (e.key === "e" || e.key === "E") {
+        e.preventDefault();
+        setInspectorVisible((v) => !v);
+      } else if (e.key === "n" || e.key === "N") {
+        e.preventDefault();
+        setScreen("empty");
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
+  const dismissToast = (id: string) =>
+    setToasts((ts) => ts.filter((t) => t.id !== id));
+  const pushToast = (e: AppError) =>
+    setToasts((ts) => [e, ...ts.filter((t) => t.id !== e.id)]);
 
   // Hooks must run unconditionally (Rules of Hooks). Compute derived
   // demo data up front; the onboarding branch below ignores it.
@@ -63,7 +105,11 @@ function App() {
       <>
         <Onboarding onComplete={() => setScreen("empty")} />
         {import.meta.env.DEV && (
-          <DevScreenToggle screen={screen} setScreen={setScreen} />
+          <DevScreenToggle
+            screen={screen}
+            setScreen={setScreen}
+            onTriggerToast={() => pushToast(makeDemoToast())}
+          />
         )}
       </>
     );
@@ -129,11 +175,86 @@ function App() {
             />
           ) : null
         }
-        inspectorVisible={screen === "main"}
+        inspectorVisible={screen === "main" && inspectorVisible}
+      />
+
+      <CommandPalette
+        open={paletteOpen}
+        onOpenChange={setPaletteOpen}
+        sessions={sessions}
+        llms={DEMO_LLMS}
+        onNewChat={() => setScreen("empty")}
+        onOpenSession={(id) => {
+          console.info("[palette] open session:", id);
+          setScreen("main");
+        }}
+        onSwitchLLM={(idx) =>
+          console.info("[palette] switch llm to index:", idx)
+        }
+        onReRunHealthCheck={() => console.info("[palette] re-run health check")}
+        onOpenSettings={() => setSettingsOpen(true)}
+        onToggleInspector={() => setInspectorVisible((v) => !v)}
+        onAttachGAFolder={() =>
+          console.info("[palette] attach GA folder — wired in #10")
+        }
+        onSubmitFreeText={(text) => {
+          console.info("[palette] free-text submit:", text);
+          setScreen("main");
+        }}
+      />
+
+      <Settings
+        open={settingsOpen}
+        onOpenChange={setSettingsOpen}
+        runtimeInfo={DEMO_RUNTIME_INFO}
+        approval={approvalConfig}
+        onChangeRequiredTools={(tools) =>
+          setApprovalConfig((c) => ({ ...c, requiredTools: tools }))
+        }
+        onRemoveAlwaysAllow={(scope, tool) => {
+          setApprovalConfig((c) =>
+            scope === "project"
+              ? {
+                  ...c,
+                  alwaysAllowProject: c.alwaysAllowProject.filter(
+                    (t) => t !== tool,
+                  ),
+                }
+              : {
+                  ...c,
+                  alwaysAllowGlobal: c.alwaysAllowGlobal.filter(
+                    (t) => t !== tool,
+                  ),
+                },
+          );
+          console.info(`[settings] removed ${scope} rule:`, tool);
+        }}
+        onChangeGAPath={() =>
+          console.info("[settings] pick GA path — wired in #10")
+        }
+        onChangeBridgePython={() =>
+          console.info("[settings] pick Bridge Python — wired in #10")
+        }
+        onReRunHealthCheck={() =>
+          console.info("[settings] re-run health check")
+        }
+      />
+
+      <ToastHost
+        toasts={toasts}
+        onDismiss={dismissToast}
+        onSwitchLLM={() => console.info("[toast] switch llm action")}
+        onOpenMyKey={() => console.info("[toast] open mykey.py")}
+        onOpenGADocs={() => console.info("[toast] open GA docs")}
+        onRetry={() => console.info("[toast] retry")}
       />
 
       {import.meta.env.DEV && (
-        <DevScreenToggle screen={screen} setScreen={setScreen} />
+        <DevScreenToggle
+          screen={screen}
+          setScreen={setScreen}
+          onTriggerToast={() => pushToast(makeDemoToast())}
+        />
       )}
     </>
   );
@@ -154,28 +275,58 @@ const SCREEN_TOGGLE_LABEL: Record<Screen, string> = {
 function DevScreenToggle({
   screen,
   setScreen,
+  onTriggerToast,
 }: {
   screen: Screen;
   setScreen: (s: Screen) => void;
+  onTriggerToast?: () => void;
 }) {
   return (
-    <div className="fixed right-4 top-14 z-50 flex gap-1 rounded-md border border-line bg-elevated px-1.5 py-1 shadow-elevated">
-      {(["onboarding", "empty", "main"] as Screen[]).map((s) => (
-        <button
-          key={s}
-          type="button"
-          onClick={() => setScreen(s)}
-          className={cn(
-            "rounded-sm px-2 py-0.5 font-mono text-[10px] uppercase tracking-wider transition-colors",
-            screen === s
-              ? "bg-ink text-elevated"
-              : "text-ink-muted hover:bg-hover",
-          )}
-        >
-          {SCREEN_TOGGLE_LABEL[s]}
-        </button>
-      ))}
+    <div className="pointer-events-none fixed right-4 top-14 z-[60] flex gap-1.5">
+      <DevSegment>
+        {(["onboarding", "empty", "main"] as Screen[]).map((s) => (
+          <DevButton key={s} active={screen === s} onClick={() => setScreen(s)}>
+            {SCREEN_TOGGLE_LABEL[s]}
+          </DevButton>
+        ))}
+      </DevSegment>
+      {onTriggerToast && (
+        <DevSegment>
+          <DevButton onClick={onTriggerToast}>+ toast</DevButton>
+        </DevSegment>
+      )}
     </div>
+  );
+}
+
+function DevSegment({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="pointer-events-auto flex gap-1 rounded-md border border-line bg-elevated px-1.5 py-1 shadow-elevated">
+      {children}
+    </div>
+  );
+}
+
+function DevButton({
+  active,
+  onClick,
+  children,
+}: {
+  active?: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        "rounded-sm px-2 py-0.5 font-mono text-[10px] uppercase tracking-wider transition-colors",
+        active ? "bg-ink text-elevated" : "text-ink-muted hover:bg-hover",
+      )}
+    >
+      {children}
+    </button>
   );
 }
 
@@ -255,6 +406,75 @@ const DEMO_RUNTIME_INFO: RuntimeInfo = {
     },
   ],
 };
+
+const DEMO_LLMS = [
+  { index: 0, displayName: "GLM 5.1", isCurrent: false },
+  { index: 1, displayName: "Claude Sonnet 4.5", isCurrent: true },
+  { index: 2, displayName: "GPT 4o", isCurrent: false },
+  { index: 3, displayName: "Gemini 2.5 Pro", isCurrent: false },
+];
+
+const DEMO_APPROVAL_CONFIG: ApprovalConfig = {
+  requiredTools: [
+    "code_run",
+    "file_write",
+    "file_patch",
+    "start_long_term_update",
+  ],
+  alwaysAllowProject: ["file_read", "web_scan"],
+  alwaysAllowGlobal: [],
+};
+
+// Cycle demo toasts on each "+ toast" click so we can preview each
+// hint variant without code-toggling. Order: check_llm_config →
+// network → quota_exceeded → plain bridge error.
+let demoToastCounter = 0;
+const DEMO_TOAST_VARIANTS: Array<
+  Pick<AppError, "category" | "severity" | "message" | "hint" | "retryable">
+> = [
+  {
+    category: "business",
+    severity: "error",
+    message: "Authentication failed: invalid api_key",
+    hint: "check_llm_config",
+    retryable: true,
+  },
+  {
+    category: "bridge",
+    severity: "error",
+    message: "Connection refused by api.anthropic.com after 30s",
+    hint: "network",
+    retryable: true,
+  },
+  {
+    category: "business",
+    severity: "warning",
+    message: "Rate limit exceeded for current LLM",
+    hint: "quota_exceeded",
+    retryable: false,
+  },
+  {
+    category: "bridge",
+    severity: "error",
+    message: "IPC protocol mismatch: bridge expects 0.1, got 0.0.9",
+    hint: null,
+    retryable: false,
+  },
+];
+
+function makeDemoToast(): AppError {
+  const variant =
+    DEMO_TOAST_VARIANTS[demoToastCounter % DEMO_TOAST_VARIANTS.length];
+  demoToastCounter += 1;
+  return makeAppError({
+    ...variant,
+    context: "demo",
+    traceback:
+      "Traceback (most recent call last):\n" +
+      '  File "/path/to/bridge/handlers.py", line 142, in dispatch\n' +
+      '    raise BridgeError("...")\n',
+  });
+}
 
 const DEMO_USER_PROMPT =
   "帮我把 sessions 表的 SQL schema 写到 desktop/src/db/migrations/001_init.sql。" +
