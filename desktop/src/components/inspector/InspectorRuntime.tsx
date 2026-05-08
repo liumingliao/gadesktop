@@ -1,15 +1,8 @@
-import {
-  ArrowsClockwise,
-  Check,
-  CircleNotch,
-  Pause,
-  Warning,
-  X,
-} from "@phosphor-icons/react";
+import { ArrowsClockwise } from "@phosphor-icons/react";
 
+import { HealthCheckCard } from "@/components/health-check/HealthCheckCard";
 import { KvRow, SectionLabel } from "@/components/inspector/atoms";
-import { cn } from "@/lib/utils";
-import type { HealthCheckItem, RuntimeInfo } from "@/types/inspector";
+import type { RuntimeInfo } from "@/types/inspector";
 
 interface InspectorRuntimeProps {
   info: RuntimeInfo;
@@ -17,12 +10,12 @@ interface InspectorRuntimeProps {
 }
 
 /**
- * Runtime tab — Health Check + bridge metadata.
+ * Runtime tab — embedded Health Check Card + bridge metadata.
  *
- * #4 ships a minimal embedded health check (just the rows + result
- * indicator). The full Health Check Card with inline action buttons
- * for failed rows lands in #5 (Onboarding) — this layout will swap to
- * `<HealthCheckCard variant="embedded" ... />` once it exists.
+ * Uses HealthCheckCard's "embedded" variant so the surrounding
+ * Inspector chrome provides the visual frame (no double-shell).
+ * Failed item action wiring would land here when the bridge starts
+ * surfacing real failures; for now Inspector Runtime tab is read-only.
  */
 export function InspectorRuntime({ info, onReRun }: InspectorRuntimeProps) {
   const allOk = info.healthChecks.every((c) => c.state === "success");
@@ -33,11 +26,7 @@ export function InspectorRuntime({ info, onReRun }: InspectorRuntimeProps) {
       <SectionLabel>
         Health Check · {allOk ? "all passed" : `${failed} failed`}
       </SectionLabel>
-      <div className="mb-1">
-        {info.healthChecks.map((c) => (
-          <HealthRow key={c.name} check={c} />
-        ))}
-      </div>
+      <HealthCheckCard items={info.healthChecks} variant="embedded" />
 
       <hr className="my-3.5 border-0 border-t border-line" aria-hidden />
 
@@ -63,49 +52,4 @@ export function InspectorRuntime({ info, onReRun }: InspectorRuntimeProps) {
       </button>
     </div>
   );
-}
-
-function HealthRow({ check }: { check: HealthCheckItem }) {
-  return (
-    <div className="flex items-center gap-2.5 py-2">
-      <span className="inline-flex shrink-0">
-        <HealthIcon state={check.state} />
-      </span>
-      <span className="flex-1 truncate text-[12.5px] text-ink">
-        {check.name}
-      </span>
-      {check.detail && (
-        <span className="truncate font-mono text-[11px] text-ink-muted">
-          {check.detail}
-        </span>
-      )}
-    </div>
-  );
-}
-
-function HealthIcon({ state }: { state: HealthCheckItem["state"] }) {
-  switch (state) {
-    case "success":
-      return <Check size={14} weight="thin" className="text-success" />;
-    case "failed":
-      return <X size={14} weight="thin" className="text-error" />;
-    case "warning":
-      return <Warning size={14} weight="thin" className="text-warning" />;
-    case "running":
-      return (
-        <span className="spin">
-          <CircleNotch size={14} weight="thin" className="text-brand-strong" />
-        </span>
-      );
-    case "blocked":
-      return <Pause size={14} weight="thin" className="text-ink-muted" />;
-    case "pending":
-    default:
-      return (
-        <span
-          className={cn("inline-block size-2 rounded-full bg-ink-muted/60")}
-          aria-hidden
-        />
-      );
-  }
 }

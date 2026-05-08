@@ -6,6 +6,7 @@ import { Sidebar } from "@/components/layout/Sidebar";
 import { TopBar } from "@/components/layout/TopBar";
 import { EmptyState } from "@/components/screens/EmptyState";
 import { MainView } from "@/components/screens/MainView";
+import { Onboarding } from "@/components/screens/onboarding/Onboarding";
 import { cn } from "@/lib/utils";
 import type {
   AgentTurn,
@@ -39,9 +40,8 @@ function App() {
   >({});
   const llmDisplayName = "Claude Sonnet 4.5";
 
-  // Derive demo turns + pending list from approvalDecisions so users
-  // see the agent advance through running / final-answer / denied
-  // states as they click decision buttons.
+  // Hooks must run unconditionally (Rules of Hooks). Compute derived
+  // demo data up front; the onboarding branch below ignores it.
   const turns = useMemo(
     () => buildDemoTurns(approvalDecisions),
     [approvalDecisions],
@@ -55,6 +55,19 @@ function App() {
   const sessions: Session[] = screen === "empty" ? [] : DEMO_SESSIONS;
   const activeSessionId = screen === "main" ? "s-today-1" : undefined;
   const activeSession = sessions.find((s) => s.id === activeSessionId);
+
+  // Onboarding is a takeover screen: no AppShell, no Sidebar/Inspector.
+  // Renders early because everything below is shell-bound.
+  if (screen === "onboarding") {
+    return (
+      <>
+        <Onboarding onComplete={() => setScreen("empty")} />
+        {import.meta.env.DEV && (
+          <DevScreenToggle screen={screen} setScreen={setScreen} />
+        )}
+      </>
+    );
+  }
 
   const handleApprove = (approvalId: string, decision: ApprovalDecision) => {
     setApprovalDecisions((prev) => ({ ...prev, [approvalId]: decision }));
@@ -130,7 +143,13 @@ export default App;
 
 // ---------------- dev-only screen toggle ----------------
 
-type Screen = "empty" | "main";
+type Screen = "onboarding" | "empty" | "main";
+
+const SCREEN_TOGGLE_LABEL: Record<Screen, string> = {
+  onboarding: "intro",
+  empty: "empty",
+  main: "main",
+};
 
 function DevScreenToggle({
   screen,
@@ -141,7 +160,7 @@ function DevScreenToggle({
 }) {
   return (
     <div className="fixed right-4 top-14 z-50 flex gap-1 rounded-md border border-line bg-elevated px-1.5 py-1 shadow-elevated">
-      {(["empty", "main"] as Screen[]).map((s) => (
+      {(["onboarding", "empty", "main"] as Screen[]).map((s) => (
         <button
           key={s}
           type="button"
@@ -153,7 +172,7 @@ function DevScreenToggle({
               : "text-ink-muted hover:bg-hover",
           )}
         >
-          {s}
+          {SCREEN_TOGGLE_LABEL[s]}
         </button>
       ))}
     </div>
