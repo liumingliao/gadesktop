@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<title>GA Workbench · 关键界面</title>
+
+<!-- Google fonts: Newsreader (serif), Inter (sans), JetBrains Mono -->
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Newsreader:ital,wght@0,400;0,500;1,400;1,500&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+
+<!-- Phosphor Icons (web font) -->
+<script src="https://unpkg.com/@phosphor-icons/web@2.1.1"></script>
+
+<link rel="stylesheet" href="styles.css" />
+
+<style>
+  body { background: #f0eee9; }
+  .canvas-intro {
+    font-family: var(--font-serif);
+    font-size: 14px; font-style: italic;
+    color: var(--text-secondary);
+    line-height: 1.6;
+  }
+</style>
+</head>
+
+<body>
+<div id="root"></div>
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+<script src="src/data.js"></script>
+<script type="text/babel" src="design-canvas.jsx"></script>
+<script type="text/babel" src="src/chrome.jsx"></script>
+<script type="text/babel" src="src/sidebar.jsx"></script>
+<script type="text/babel" src="src/composer.jsx"></script>
+<script type="text/babel" src="src/callout.jsx"></script>
+<script type="text/babel" src="src/diff.jsx"></script>
+<script type="text/babel" src="src/main.jsx"></script>
+<script type="text/babel" src="src/onboarding.jsx"></script>
+<script type="text/babel" src="src/empty.jsx"></script>
+<script type="text/babel" src="src/timeline.jsx"></script>
+<script type="text/babel" src="src/approval.jsx"></script>
+
+<script type="text/babel" data-presets="env,react">
+function App() {
+  return (
+    <DesignCanvas>
+      <DCSection
+        id="ga-workbench"
+        title="GA Workbench · v0.1 关键界面"
+        subtitle="Notion + Claude · light-first · 5 张关键界面，主界面有交互。点 sidebar 切 session、callout 折叠展开、Approval 4 个按钮真有反馈。"
+      >
+        <DCArtboard id="ab-onboarding" label="01 · Onboarding · Health Check" width={1180} height={780}>
+          <div data-screen-label="01 Onboarding">
+            <MacChrome width={1180} height={780} title="GA Workbench · 设置">
+              <Onboarding />
+            </MacChrome>
+          </div>
+        </DCArtboard>
+
+        <DCArtboard id="ab-empty" label="02 · Empty State · 你想做什么" width={1280} height={820}>
+          <div data-screen-label="02 Empty">
+            <MacChrome width={1280} height={820} title="GA Workbench">
+              <EmptyState />
+            </MacChrome>
+          </div>
+        </DCArtboard>
+
+        <DCArtboard id="ab-main" label="03 · 主界面 · coding session 待审批中" width={1480} height={920}>
+          <div data-screen-label="03 Main">
+            <MacChrome width={1480} height={920} title="Workbench 桌面端 SQLite schema · GA Workbench">
+              <MainView />
+            </MacChrome>
+          </div>
+        </DCArtboard>
+
+        <DCArtboard id="ab-timeline" label="04 · Tool Timeline · 6 状态映射" width={1240} height={920}>
+          <div data-screen-label="04 Timeline">
+            <MacChrome width={1240} height={920} title="Tool Timeline · 6 状态映射">
+              <ToolTimelineShowcase />
+            </MacChrome>
+          </div>
+        </DCArtboard>
+
+        <DCArtboard id="ab-approval" label="05 · Approval Card · file_patch split diff" width={1240} height={880}>
+          <div data-screen-label="05 Approval">
+            <MacChrome width={1240} height={880} title="Approval · file_patch">
+              <ApprovalCardShowcase />
+            </MacChrome>
+          </div>
+        </DCArtboard>
+      </DCSection>
+    </DesignCanvas>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+</body>
+</html>

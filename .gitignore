@@ -43,3 +43,8 @@ desktop/src-tauri/gen/
 .env
 .env.local
 *.log
+
+# Design handoff bundle: keep prototype, drop the uploads/ duplicates
+# (those are CLAUDE.md / PRD.md / DESIGN.md copies the design agent
+# received as input; the canonical files live elsewhere in docs/).
+docs/GenericAgent Workbench-handoff/project/uploads/
