@@ -1,6 +1,7 @@
 import { create } from "zustand";
 
 import type { ApprovalConfig } from "@/components/screens/settings/Settings";
+import { loadSessions, persistSession } from "@/lib/db";
 import {
   DEMO_APPROVAL_CONFIG,
   DEMO_APPROVAL_RECORDS,
@@ -69,6 +70,9 @@ interface Actions {
   // Errors
   pushToast: (e: AppError) => void;
   dismissToast: (id: string) => void;
+
+  // Persistence
+  hydrateFromDB: () => Promise<void>;
 }
 
 export type AppStore = State & Actions;
@@ -162,4 +166,30 @@ export const useAppStore = create<AppStore>((set, get) => ({
     set((state) => ({
       toasts: state.toasts.filter((t) => t.id !== id),
     })),
+
+  // ---- Persistence ----
+  //
+  // Called once at app mount. Loads sessions from SQLite; if the DB
+  // is empty, seeds the demo fixtures into it so the dev build has
+  // something to render. Falls back silently to the demo seed already
+  // in initial state if SQLite isn't available (e.g. Vite-only dev
+  // server, or first launch before tauri-plugin-sql finishes init).
+  hydrateFromDB: async () => {
+    try {
+      const sessions = await loadSessions();
+      if (sessions.length === 0) {
+        await Promise.all(DEMO_SESSIONS.map(persistSession));
+        // Initial state already has DEMO_SESSIONS — no setState needed.
+      } else {
+        set({ sessions });
+      }
+    } catch (e) {
+      // Non-Tauri context (Vite dev) or migration not yet applied.
+      // Initial state's DEMO_SESSIONS continues to render.
+      console.warn(
+        "[store] hydrateFromDB: SQLite unavailable, using demo seed.",
+        e,
+      );
+    }
+  },
 }));

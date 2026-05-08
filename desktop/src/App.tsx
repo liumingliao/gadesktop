@@ -67,6 +67,16 @@ function App() {
   const pushToast = useAppStore((s) => s.pushToast);
   const dismissToast = useAppStore((s) => s.dismissToast);
 
+  const hydrateFromDB = useAppStore((s) => s.hydrateFromDB);
+
+  // Hydrate sessions from SQLite on mount. Falls through to the demo
+  // seed already in the store if SQLite isn't ready (Vite-only dev,
+  // first launch). #10 will hydrate conversation / approval rules /
+  // prefs here too.
+  useEffect(() => {
+    hydrateFromDB();
+  }, [hydrateFromDB]);
+
   // Global keyboard shortcuts: ⌘K palette, ⌘, settings, ⌘E inspector,
   // ⌘N new chat. Esc handled by Radix Dialog (Settings) and cmdk
   // (CommandPalette) themselves.

@@ -1,0 +1,83 @@
+/**
+ * SQLite row shapes — direct mirror of the `migrations/001_init.sql`
+ * column layout. `*Row` types use snake_case to match the schema; the
+ * `lib/db.ts` mappers convert between row and domain (camelCase) types.
+ *
+ * Keep this file in sync when migrating columns. Adding a column means
+ * a new migration file + a field on the Row + the mapper.
+ */
+
+export interface SessionRow {
+  id: string;
+  project_id: string | null;
+  title: string;
+  status: string;
+  summary: string | null;
+  turn_count: number;
+  current_tool: string | null;
+  pending_approval_count: number;
+  error_count: number;
+  pid: number | null;
+  cwd: string | null;
+  pinned: number; // 0 / 1
+  llm_index: number | null;
+  llm_display_name: string | null;
+  last_activity_at: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ProjectRow {
+  id: string;
+  name: string;
+  root_path: string | null;
+  icon: string | null;
+  color: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface MessageRow {
+  id: string;
+  session_id: string;
+  turn_index: number;
+  sequence: number;
+  role: "system" | "user" | "assistant" | "tool";
+  content: string;
+  tool_calls: string | null; // JSON array
+  tool_results: string | null; // JSON array
+  thinking: string | null;
+  final_answer: string | null;
+  created_at: string;
+}
+
+export interface ToolEventRow {
+  id: string;
+  session_id: string;
+  turn_index: number;
+  tool_name: string;
+  status: string;
+  args_json: string | null;
+  args_preview: string | null;
+  result_preview: string | null;
+  risk_level: "low" | "medium" | "high" | null;
+  approval_id: string | null;
+  approval_decision: string | null;
+  elapsed_ms: number | null;
+  started_at: string;
+  ended_at: string | null;
+}
+
+export interface ApprovalRuleRow {
+  id: number;
+  scope: "project" | "global";
+  project_id: string | null;
+  tool_name: string;
+  created_at: string;
+}
+
+export interface PrefRow {
+  key: string;
+  value: string; // JSON
+  updated_at: string;
+}

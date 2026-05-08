@@ -5,6 +5,22 @@
   "windows": ["main"],
   "permissions": [
     "core:default",
-    "opener:default"
+    "opener:default",
+    {
+      "identifier": "sql:allow-load",
+      "allow": [{ "url": "sqlite:workbench.db" }]
+    },
+    {
+      "identifier": "sql:allow-execute",
+      "allow": [{ "url": "sqlite:workbench.db" }]
+    },
+    {
+      "identifier": "sql:allow-select",
+      "allow": [{ "url": "sqlite:workbench.db" }]
+    },
+    {
+      "identifier": "sql:allow-close",
+      "allow": [{ "url": "sqlite:workbench.db" }]
+    }
   ]
 }
