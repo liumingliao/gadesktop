@@ -3,43 +3,57 @@ import type { ReactNode } from "react";
 import { cn } from "@/lib/utils";
 
 /**
- * Three-pane shell: Sidebar (240px) | Main (flex) | Inspector (320px).
+ * Full app shell:
  *
- * Stage 2 #1 placeholder. Real components land in #2-#7.
+ *   ┌─────────────────────────────────────────────────────────────┐
+ *   │ Top Bar (44px, full width)                                   │
+ *   ├──────────┬──────────────────────────────┬───────────────────┤
+ *   │ Sidebar  │ Main                         │ Inspector         │
+ *   │ (240px)  │ (flex)                       │ (320px, optional) │
+ *   └──────────┴──────────────────────────────┴───────────────────┘
  *
- * The Top Bar is rendered as part of `main` (44px tall, integrates the
- * macOS traffic light via tauri.conf.json `titleBarStyle: "Overlay"`).
- * The traffic light position is set to {x: 16, y: 16} so the buttons
- * align with the 44px top bar gutter.
+ * macOS traffic light is positioned at {16, 16} via tauri.conf.json
+ * `titleBarStyle: "Overlay"` and floats over the Top Bar. The Top Bar
+ * itself reserves left padding for it; Sidebar content starts at y=44px
+ * and never collides with the traffic light.
+ *
+ * Inspector visibility is per-screen: Empty State hides it, Main View
+ * shows it. The 1120px minimum window width guarantees three columns
+ * fit when the inspector is visible.
  */
 export function AppShell({
+  topBar,
   sidebar,
   main,
   inspector,
   inspectorVisible = true,
 }: {
+  topBar: ReactNode;
   sidebar: ReactNode;
   main: ReactNode;
-  inspector: ReactNode;
+  inspector?: ReactNode;
   inspectorVisible?: boolean;
 }) {
   return (
-    <div className="flex h-screen w-screen min-w-[1120px] min-h-[720px] bg-app text-ink">
-      <aside className="flex w-60 shrink-0 flex-col border-r border-line bg-app">
-        {sidebar}
-      </aside>
-
-      <main className="flex min-w-0 flex-1 flex-col bg-app">{main}</main>
-
-      {inspectorVisible && (
-        <aside
-          className={cn(
-            "flex w-80 shrink-0 flex-col border-l border-line bg-app",
-          )}
-        >
-          {inspector}
+    <div className="flex h-screen min-h-[720px] w-screen min-w-[1120px] flex-col bg-app text-ink">
+      {topBar}
+      <div className="flex min-h-0 flex-1">
+        <aside className="flex w-60 shrink-0 flex-col border-r border-line bg-app">
+          {sidebar}
         </aside>
-      )}
+
+        <main className="flex min-w-0 flex-1 flex-col bg-app">{main}</main>
+
+        {inspectorVisible && inspector && (
+          <aside
+            className={cn(
+              "flex w-80 shrink-0 flex-col border-l border-line bg-app",
+            )}
+          >
+            {inspector}
+          </aside>
+        )}
+      </div>
     </div>
   );
 }

@@ -38,48 +38,53 @@ GA Workbench 的视觉与交互气质 = **Notion + Claude**。
 
 ### 2.1 色板（Light-first）
 
+> 命名约定：CSS variable 写 `--color-*`（Tailwind v4 `@theme` 友好），utility class 写 `bg-*` / `text-*` / `border-*`。文字色用 `ink` 命名空间（避开 `text-text-*` 双重命名），边框色用 `line` 命名空间（避开 `border-border-*`）。设计稿与文档讨论时可用语义名（"主文本色 / 卡片边"），代码层用工程名。
+
 #### 基底层
 
-| Token | 值 | 用途 |
-|---|---|---|
-| `bg-app` | `#FAF7F2` | App background，暖米白（不是纯白） |
-| `surface` | `#FDFAF5` | 普通卡片底 |
-| `surface-elevated` | `#FFFFFF` | 浮起卡片（Health Check / Error / Command Palette） |
-| `surface-overlay` | `rgba(31,27,23,0.4)` | Command Palette / modal 遮罩 |
+| CSS variable | Utility | 值 | 用途 |
+|---|---|---|---|
+| `--color-app` | `bg-app` | `#FAF7F2` | App background，暖米白（不是纯白） |
+| `--color-surface` | `bg-surface` | `#FDFAF5` | 普通卡片底 |
+| `--color-elevated` | `bg-elevated` | `#FFFFFF` | 浮起卡片（Health Check / Error / Command Palette） |
+| `--color-overlay` | `bg-overlay` | `rgba(31,27,23,0.4)` | Command Palette / modal 遮罩 |
 
-#### 边框 / 分隔
+#### 边框 / 分隔（line 命名空间）
 
-| Token | 值 | 用途 |
-|---|---|---|
-| `border-default` | `#EDE6D8` | 卡片边、divider |
-| `border-strong` | `#D9CFB8` | hover 边、focus 边（非杏沙时） |
+| CSS variable | Utility | 值 | 用途 |
+|---|---|---|---|
+| `--color-line` | `border-line` | `#EDE6D8` | 卡片边、divider 默认 |
+| `--color-line-strong` | `border-line-strong` | `#D9CFB8` | hover 边、focus 边（非杏沙时） |
+| `--color-line-subtle` | `border-line-subtle` | `rgba(31,27,23,0.06)` | 更弱的内分隔（如 inspector row 之间） |
 
-#### 文字三档
+#### 文字三档（ink 命名空间）
 
-| Token | 值 | 用途 |
-|---|---|---|
-| `text-primary` | `#1F1B17` | charcoal-warm，标题、主文本、主 CTA 填充 |
-| `text-secondary` | `#5C544A` | 次要文本、metadata |
-| `text-muted` | `#8E867A` | hint、placeholder、timestamp |
+| CSS variable | Utility | 值 | 用途 |
+|---|---|---|---|
+| `--color-ink` | `text-ink` / `bg-ink` | `#1F1B17` | charcoal-warm，标题、主文本、主 CTA 填充 |
+| `--color-ink-soft` | `text-ink-soft` | `#5C544A` | 次要文本、metadata |
+| `--color-ink-muted` | `text-ink-muted` | `#8E867A` | hint、placeholder、timestamp |
 
 #### 互动状态
 
-| Token | 值 | 用途 |
-|---|---|---|
-| `hover-tint` | `#F2EDE3` | 中性灰 hover（不抢戏） |
-| `selected-tint` | `#F8EDDA` | 杏沙 tint（品牌时刻） |
-| `focus-ring` | `#D9A78A` | 杏沙 focus ring |
+| CSS variable | Utility | 值 | 用途 |
+|---|---|---|---|
+| `--color-hover` | `bg-hover` | `#F2EDE3` | 中性灰 hover（不抢戏） |
+| `--color-selected` | `bg-selected` | `#F8EDDA` | 杏沙 tint（品牌时刻） |
+
+> Focus ring 用 `--color-brand`（`ring-brand`），不单独 token。
 
 #### 品牌 / 状态
 
-| Token | 值 | 用途 |
-|---|---|---|
-| `brand` | `#D9A78A` | 杏沙，体温色，**不做主 CTA 填充** |
-| `brand-soft` | `#F8EDDA` | 杏沙最浅 tint |
-| `success` | `#5A8C5A` | 成功状态 line icon |
-| `warning` | `#BF7A1F` | 深琥珀，warning（与杏沙拉开 13° 色相） |
-| `error` | `#B14545` | 深红 |
-| `info` | `#7A7A8E` | muted 灰蓝（info severity） |
+| CSS variable | Utility | 值 | 用途 |
+|---|---|---|---|
+| `--color-brand` | `bg-brand` / `text-brand` / `ring-brand` | `#D9A78A` | 杏沙，体温色 + Composer Submit CTA 例外 |
+| `--color-brand-soft` | `bg-brand-soft` | `#F8EDDA` | 杏沙最浅 tint |
+| `--color-brand-strong` | `bg-brand-strong` / `text-brand-strong` | `#C68762` | 杏沙 hover/active；当前 step 状态 icon、Submit hover |
+| `--color-success` | `text-success` / `bg-success` | `#5A8C5A` | 成功状态 line icon |
+| `--color-warning` | `text-warning` / `bg-warning` | `#BF7A1F` | 深琥珀 warning（与杏沙拉开 13° 色相） |
+| `--color-error` | `text-error` / `bg-error` | `#B14545` | 深红 |
+| `--color-info` | `text-info` / `bg-info` | `#7A7A8E` | muted 灰蓝（info severity） |
 
 ### 2.2 字体（方案 C：三 register）
 

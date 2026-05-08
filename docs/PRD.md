@@ -490,8 +490,8 @@ Notion / Claude.ai / Linear / Raycast / opencode Desktop。
 ## 16. 技术栈
 
 - **Shell**：Tauri v2
-- **Frontend**：React 18 + TypeScript + Vite
-- **Styling**：Tailwind CSS + shadcn/Radix
+- **Frontend**：React 19 + TypeScript 5.8 strict + Vite 7
+- **Styling**：Tailwind CSS v4（CSS-first `@theme`）+ shadcn / Radix（按需 add，主要给 Command Palette / Dialog / Popover / DropdownMenu / Tabs 等 a11y 复杂组件）
 - **Local DB**：SQLite
 - **Bridge**：Python 脚本（import GA 公开 API）
 - **IPC**：stdio JSON Lines（V0.1 起步），可后续切到本地 socket
