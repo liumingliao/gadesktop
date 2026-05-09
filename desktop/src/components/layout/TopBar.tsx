@@ -21,24 +21,39 @@ export interface TopBarProps {
 /**
  * Top bar — full-window-width, 44px tall. Per DESIGN.md §4.1.
  *
- *   [ traffic light reserved | title (inline edit later) | ⌘K | ... ]
+ *   [ traffic light reserved │  ─── title (centered) ───  │ ⌘K  ... ]
  *
- * Sidebar toggle lives inside Sidebar.tsx header (next to the logo) —
- * placing it here would visually collide with the macOS traffic light
- * cluster (16-68px) and feel cramped. Standard macOS apps (Notion,
- * Linear, Arc, Cursor) all keep the sidebar toggle on the sidebar
- * itself, which is the affordance it acts on.
+ * Layout — three flex sections; the title sits centered in the
+ * remaining space between the traffic-light reserve (left) and the
+ * action cluster (right). This is the standard macOS pattern (Safari,
+ * Notion, Mail.app, Pages, Finder): the document title floats centered
+ * in the chrome, not glued to the traffic-light cluster.
  *
- * Window dragging: the root div opts in via `data-tauri-drag-region`,
- * which makes the whole bar (including the title slot) a drag handle.
- * Tauri auto-excludes interactive elements (buttons), so the IconButton
- * children remain clickable without extra escape hatches.
+ * Why not just left-align with extra padding: with paddingLeft = 70px
+ * the title sat 2px from the traffic light's right edge — visually it
+ * read as a single cramped cluster. Adding more padding helps the
+ * spacing but the asymmetry (title left, actions right) still feels
+ * off. Centering produces the symmetric chrome the OS conditions us to
+ * expect.
+ *
+ * Sidebar toggle lives inside Sidebar.tsx header (next to the logo).
+ * Co-locating an affordance with its target avoids visual collision
+ * with the traffic-light cluster (16-68px) and matches Notion / Linear
+ * / Arc / Cursor convention.
+ *
+ * Window dragging:
+ *   - Tauri v2 only honours `data-tauri-drag-region` when the
+ *     `core:window:allow-start-dragging` permission is granted —
+ *     `core:default` does NOT include it. We add it explicitly in
+ *     capabilities/default.json.
+ *   - The attribute is non-bubbling (the element receiving mousedown
+ *     must carry it). We mark the root, the title slot, and the title
+ *     span / placeholder. Buttons are auto-excluded by Tauri.
  *
  * V0.1 #2: title is read-only display; inline edit lands in #3 when
- * conversation state has a place to live. When inline edit lands, the
- * editing <input> must opt out of the drag region (otherwise mousedown
- * gets captured by the OS for window drag instead of focusing the
- * input).
+ * conversation state has a place to live. The editing <input> will
+ * need to opt out of drag region (otherwise mousedown gets captured by
+ * the OS for window drag instead of focusing the input).
  */
 export function TopBar({
   sessionTitle,
@@ -48,25 +63,41 @@ export function TopBar({
   return (
     <div
       data-tauri-drag-region
-      className="flex h-11 shrink-0 items-center gap-3 border-b border-line bg-app pr-3 text-[13px]"
-      style={{ paddingLeft: trafficLightPadding }}
+      className="flex h-11 shrink-0 items-stretch border-b border-line bg-app pr-3 text-[13px]"
     >
-      <div data-tauri-drag-region className="min-w-0 flex-1 truncate">
+      {/* Left: traffic-light reserve. Pure spacer, draggable. */}
+      <div
+        data-tauri-drag-region
+        className="shrink-0"
+        style={{ width: trafficLightPadding }}
+      />
+
+      {/* Center: title centered in remaining space. flex-1 so it
+          consumes whatever the action cluster doesn't. */}
+      <div
+        data-tauri-drag-region
+        className="flex min-w-0 flex-1 items-center justify-center px-3"
+      >
         {sessionTitle ? (
-          <span data-tauri-drag-region className="font-medium text-ink">
+          <span
+            data-tauri-drag-region
+            className="truncate font-medium text-ink"
+          >
             {sessionTitle}
           </span>
         ) : (
           <span
             data-tauri-drag-region
-            className="font-serif italic text-ink-muted"
+            className="truncate font-serif italic text-ink-muted"
           >
             新对话
           </span>
         )}
       </div>
 
-      <div className="flex items-center gap-1">
+      {/* Right: action cluster. Buttons are auto-excluded from drag
+          region by Tauri so they remain clickable. */}
+      <div className="flex shrink-0 items-center gap-1">
         <IconButton
           title="Search · ⌘K"
           onClick={onOpenCommandPalette}
