@@ -96,8 +96,18 @@ export function dispatchIPCEvent(
     }
 
     case "turn_end": {
+      console.info("[ipc] turn_end", {
+        turnIndex: event.turnIndex,
+        toolCallCount: event.toolCalls?.length ?? 0,
+        hasFinalAnswer: !!event.responseContent,
+      });
       const turn = turnFromTurnEnd(event);
       s.appendAgentTurn(turn);
+      // Defensive: appendAgentTurn already sets agentRunning=false in
+      // its reducer, but call it again here so the IPC layer is
+      // self-contained — anyone tracing event flow without reading
+      // the store action sees the state transition explicitly.
+      s.setAgentRunning(false);
       // Best-effort SQLite double-write. Silently swallow when the
       // backend isn't available (Vite dev / first launch / migration).
       void persistTurnEndToMessages(event);

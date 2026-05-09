@@ -449,3 +449,14 @@ export const useAppStore = create<AppStore>((set, get) => ({
     }
   },
 }));
+
+// Expose the store on `window.__store` in dev so the user can
+// inspect / mutate state from the DevTools console without React
+// DevTools. Stripped in production by `import.meta.env.DEV`.
+//
+// Usage in console:
+//   __store.getState().agentRunning
+//   __store.setState({ agentRunning: false })  // unblock if stuck
+if (import.meta.env.DEV) {
+  (globalThis as { __store?: typeof useAppStore }).__store = useAppStore;
+}
