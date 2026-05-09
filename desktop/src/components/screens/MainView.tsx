@@ -1,7 +1,12 @@
 import { ApprovalDock } from "@/components/conversation/ApprovalDock";
 import { Composer } from "@/components/conversation/Composer";
 import { Conversation } from "@/components/conversation/Conversation";
-import type { PendingApproval, Turn } from "@/types/conversation";
+import { ToolCallout } from "@/components/conversation/ToolCallout";
+import type {
+  ConversationToolEvent,
+  PendingApproval,
+  Turn,
+} from "@/types/conversation";
 import type { ApprovalDecision } from "@/types/ipc";
 
 export interface MainViewProps {
@@ -54,9 +59,24 @@ export function MainView({
             approvalDecisions={approvalDecisions}
             onApprove={onApprove}
           />
+          {/* In-flight pending approvals — rendered after the
+              completed turns. The agent has emitted tool_call_pending
+              but the turn hasn't ended yet, so these tools aren't in
+              `turns[].tools` (turn_end is what folds them in). We
+              render them inline as ToolCallouts so the user sees the
+              full Approval Card (diff / args / buttons), not just an
+              "等待审批中" placeholder. Once the user decides, the
+              store removes the pending entry; the eventual turn_end
+              brings the same tool back as part of a finalized turn. */}
           {stillWaiting && (
-            <div className="mt-4 pl-1 font-serif text-[13px] italic text-ink-muted">
-              等待审批中 · agent 已暂停在 dispatch
+            <div className="mt-4 space-y-2">
+              {pendingApprovals.map((p) => (
+                <ToolCallout
+                  key={p.approvalId}
+                  tool={pendingToToolEvent(p)}
+                  onApprove={(decision) => onApprove?.(p.approvalId, decision)}
+                />
+              ))}
             </div>
           )}
         </div>
@@ -87,4 +107,24 @@ export function MainView({
       </div>
     </div>
   );
+}
+
+/**
+ * Synthesize a ConversationToolEvent from a PendingApproval so
+ * ToolCallout (which expects the full event shape) can render the
+ * in-flight Approval Card. Status is hard-coded "waiting_approval"
+ * — that's the only state pendings ever appear in. `args` is what
+ * lets the tool-specific renderers (PatchView for file_patch,
+ * command preview for code_run) light up; without it ToolCallout
+ * falls back to the raw mono args block.
+ */
+function pendingToToolEvent(p: PendingApproval): ConversationToolEvent {
+  return {
+    id: p.approvalId,
+    name: p.toolName,
+    status: "waiting_approval",
+    args: p.args,
+    riskLevel: p.riskLevel,
+    approvalId: p.approvalId,
+  };
 }

@@ -105,6 +105,7 @@ export function dispatchIPCEvent(
         toolName: event.toolName,
         target,
         riskLevel: event.riskLevel,
+        args: event.args,
       };
       s.addPendingApproval(pending);
       return;

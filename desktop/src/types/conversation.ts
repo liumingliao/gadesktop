@@ -79,6 +79,15 @@ export interface PendingApproval {
    * command summary, memory key. */
   target?: string;
   riskLevel: RiskLevel;
+  /**
+   * Full tool args dict from the bridge's `tool_call_pending` event.
+   * Required so MainView can render a complete Approval Card (with
+   * tool-specific views like PatchView for file_patch, command preview
+   * for code_run, etc.) while the in-flight turn hasn't yet been
+   * folded into `turns[]` via turn_end. Without this the user sees
+   * only the dock's "等待审批中" placeholder — no diff, no buttons.
+   */
+  args?: Record<string, unknown>;
 }
 
 /** Decision callback shape used by the Approval form / Dock. */
