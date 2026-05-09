@@ -404,7 +404,41 @@ Final answer 跟 Thinking summary 都通过 `react-markdown` + `remark-gfm` + Sh
 - 视觉容器：1px line border + bg-surface + 圆角 6px + 顶部一行 mono uppercase 11px 显示语言名
 - 横向 overflow scrollable（不 wrap）
 
-V0.1 不做：代码块行号 / Copy 按钮 / Edit 在行内（V0.2 候选）。
+V0.1 代码块顶部 header 右侧加 **hover-revealed Copy 按钮**（11px Phosphor `Copy` thin + uppercase "Copy" 标签，hover 时 fade-in，复制后变 ✓ + "Copied" 1.5s 反馈）。复制内容是**纯代码**——不带 ` ``` ` fence、不带 markdown chrome。Claude.ai / ChatGPT / Cursor 的肌肉记忆位置。
+
+V0.1 不做：代码块行号 / Edit 在行内（V0.2 候选）。
+
+#### Message Actions（reply 级行动条）
+
+每段 agent final answer 下方常驻一行 muted 行动条（DESIGN.md §4.3 dogfood 反馈：用户经常想保留 reply 内容）：
+
+| 按钮 | 行为 |
+|---|---|
+| `Copy` | 复制原始 markdown source（带 `**bold**` `## headers`），不是渲染后纯文本——用户粘贴目的地（Notion / Obsidian / Slack / 邮件）多数能 re-render markdown |
+| `Save` | Tauri save dialog → `.md` 文件。默认文件名 `ga-{YYYYMMDD-HHmmss}.md`，用户可改 |
+
+视觉：
+
+- 位置：reply markdown 渲染**正下方**，gap 8px (`mt-2`)
+- 字号 12px Inter + 13px Phosphor thin icon
+- **常驻可见**（不 hover-only），text-ink-muted；hover 升 ink-soft + bg-hover
+- 点击后 0.5s 内 icon 变 Check + 文字变 "Copied" / "Saved"，1.5s 后回 idle
+- success 反馈用 `text-success`（绿色 token）
+
+工程：
+- Copy 走 `navigator.clipboard.writeText` web API（Tauri webview 支持）
+- Save 走 `@tauri-apps/plugin-dialog` `save()` + `@tauri-apps/plugin-fs` `writeTextFile`
+- Capabilities 加 `dialog:default` / `fs:allow-write-text-file` + `fs:scope` 限制到 `$HOME` / `$DOCUMENT` / `$DESKTOP` / `$DOWNLOAD`（保留用户常去的目录）
+
+V0.1 **不做**：
+
+- **Regenerate 按钮**：需要 GA history 回滚 + 跨 turn 状态管理，工程量大；推后到 V0.2 跟 multi-session / session 恢复一并设计
+- **Continue 按钮**：用户自己输入"继续"即可，不需要专用按钮
+- **Pin / 收藏**：需要数据模型扩展，V0.1 单 session 不值
+- **Branch（从这里分叉新 session）**：跟 multi-session 深度耦合，V0.1 没法做
+- **TTS / 翻译 / Share**：依赖外部服务，跟产品定位不符
+
+ReactNode children（非 markdown string）的 reply 不渲染 actions——demo fixture 没 markdown source 可复制。
 
 #### Thinking Placeholder（in-flight 占位）
 

@@ -1,6 +1,7 @@
 import { isValidElement, type ReactNode } from "react";
 
 import { MarkdownView } from "@/components/conversation/MarkdownView";
+import { MessageActions } from "@/components/conversation/MessageActions";
 
 /**
  * Final agent answer — Newsreader 16.5px, no callout chrome, "floats
@@ -12,13 +13,19 @@ import { MarkdownView } from "@/components/conversation/MarkdownView";
  * passes through unchanged so demo fixtures and tests can still
  * inject hand-built content.
  *
- * The pre-markdown version of this component had inline styles for
- * `<code>` here; that lives in MarkdownView's prose class now so
- * the typography rules don't fork between the two render paths.
+ * Message actions (Copy / Save): rendered below the markdown when
+ * we have a string source (i.e. a real LLM reply). ReactNode demo
+ * children skip them — there's no canonical markdown source to copy
+ * back out, and demos rarely need actions.
  */
 export function MessageAgent({ children }: { children: ReactNode }) {
   if (typeof children === "string") {
-    return <MarkdownView source={children} variant="agent" />;
+    return (
+      <div>
+        <MarkdownView source={children} variant="agent" />
+        <MessageActions source={children} />
+      </div>
+    );
   }
   // Already-rendered ReactNodes (demo / tests / future inline edit).
   // We fall back to the same outer wrapper styles as the markdown

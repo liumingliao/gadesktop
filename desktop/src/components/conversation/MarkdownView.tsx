@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { Check, Copy } from "@phosphor-icons/react";
+import { useEffect, useRef, useState } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { createHighlighterCore, type HighlighterCore } from "shiki/core";
@@ -233,12 +234,17 @@ function CodeBlock({ code, language }: CodeBlockProps) {
   }, [code, lang]);
 
   return (
-    <div className="my-3.5 overflow-hidden rounded-md border border-line bg-surface">
-      {language && (
-        <div className="flex items-center justify-between border-b border-line bg-elevated px-3 py-1.5 font-mono text-[10.5px] uppercase tracking-[0.08em] text-ink-muted">
-          <span>{language}</span>
-        </div>
-      )}
+    <div className="group/codeblock relative my-3.5 overflow-hidden rounded-md border border-line bg-surface">
+      {/* Header row: language label + Copy button. Always render the
+          row so the Copy button has a stable home; if no language is
+          known, the left side stays empty but the button keeps its
+          position. */}
+      <div className="flex items-center justify-between border-b border-line bg-elevated px-3 py-1.5">
+        <span className="font-mono text-[10.5px] uppercase tracking-[0.08em] text-ink-muted">
+          {language ?? ""}
+        </span>
+        <CodeCopyButton code={code} />
+      </div>
       <div
         className={cn(
           "overflow-x-auto px-3.5 py-3 font-mono text-[13px] leading-[1.55] text-ink",
@@ -256,6 +262,57 @@ function CodeBlock({ code, language }: CodeBlockProps) {
         )}
       </div>
     </div>
+  );
+}
+
+/**
+ * Copy button on each code block. Hover-revealed (not always-on) so
+ * resting code blocks feel uncluttered; Claude.ai / ChatGPT use the
+ * same hover pattern. Uses the parent's `group/codeblock` for hover
+ * scoping so nested code blocks don't trigger each other.
+ */
+function CodeCopyButton({ code }: { code: string }) {
+  const [copied, setCopied] = useState(false);
+  const timer = useRef<number | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (timer.current) window.clearTimeout(timer.current);
+    };
+  }, []);
+
+  const onCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(code);
+      setCopied(true);
+      if (timer.current) window.clearTimeout(timer.current);
+      timer.current = window.setTimeout(() => setCopied(false), 1500);
+    } catch (e) {
+      console.warn("[CodeCopyButton] copy failed", e);
+    }
+  };
+
+  return (
+    <button
+      type="button"
+      onClick={onCopy}
+      className={cn(
+        "inline-flex items-center gap-1 rounded-sm px-1.5 py-0.5 text-[10.5px] uppercase tracking-[0.08em] transition-opacity",
+        // Hidden until hover, but stays put once you've clicked
+        // (focus-visible) so keyboard users can still see feedback.
+        "opacity-0 group-hover/codeblock:opacity-100 focus-visible:opacity-100",
+        copied
+          ? "text-success"
+          : "text-ink-muted hover:bg-hover hover:text-ink-soft",
+      )}
+    >
+      {copied ? (
+        <Check size={11} weight="bold" />
+      ) : (
+        <Copy size={11} weight="thin" />
+      )}
+      <span>{copied ? "Copied" : "Copy"}</span>
+    </button>
   );
 }
 
