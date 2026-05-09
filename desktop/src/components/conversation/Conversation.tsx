@@ -122,15 +122,18 @@ function StrongHr() {
 }
 
 /**
- * Turn-divider rule. Spacing: `my-6` (48px). Earlier `my-9` (72px)
- * felt too sparse during dogfood — DESIGN.md §4.3 documents the
- * change rationale. The "Turn N" waypoint lives on each agent
- * turn's header (AgentTurnView), not on the divider.
+ * Turn-divider rule. Spacing: `my-5` (40px). History:
+ *   - my-9 (72px) original — too sparse, felt like every turn ate a
+ *     third of the screen
+ *   - my-6 (48px) first tightening — still felt large in dogfood
+ *   - my-5 (40px) current — DESIGN.md §4.3's stated floor
+ * The "Turn N" waypoint lives on each agent turn's header
+ * (AgentTurnView), not on the divider.
  */
 function SoftHr() {
   return (
     <hr
-      className="mx-[12%] my-6 border-0 border-t border-line opacity-60"
+      className="mx-[12%] my-5 border-0 border-t border-line opacity-60"
       aria-hidden
     />
   );
