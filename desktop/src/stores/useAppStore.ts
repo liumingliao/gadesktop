@@ -191,7 +191,7 @@ export interface SessionRuntime {
  */
 const TITLE_DERIVE_MAX = 30;
 
-/** Same idea, for the Sidebar second-line "Turn N · {summary}". */
+/** Same idea, for the Sidebar second-line "第 N 步 · {summary}". */
 const SUMMARY_TRUNCATE_MAX = 60;
 
 function deriveTitleFromText(text: string): string {
@@ -428,14 +428,14 @@ interface Actions {
    * Bump a session's turn_count + last_activity_at on turn_end and
    * persist back to SQLite. Called from the IPC layer when a turn
    * completes so Sidebar bucketing (today / week / earlier) and the
-   * "Turn N" badge reflect activity without a full reload.
+   * "第 N 步" badge reflect activity without a full reload.
    *
    * Status is set to "idle" — turn_end is the canonical "agent
    * finished this round" signal; subsequent runs flip status back
    * to "running" via setBridgeStatus + agentRunning.
    *
    * `summary` (optional) is GA's per-turn summary from turn_end. When
-   * present, written into `session.summary` as `Turn N · {summary}`
+   * present, written into `session.summary` as `第 N 步 · {summary}`
    * for the Sidebar two-line preview. Truncated to keep the line
    * single-row.
    */
@@ -781,9 +781,13 @@ export const useAppStore = create<AppStore>((set, get) => ({
         // truncate ellipsis without wrapping. When the bridge didn't
         // emit a summary we keep the previous one rather than wipe
         // it — staleness beats blanking the row on every turn.
+        // Sidebar二行预览：用「第 N 步」跟 TurnMarker 一致，避免
+        // 跟用户对话「轮次」混淆。N 是 GA 内核 turn_index（单条
+        // user message 可能触发多个 step），不是 session 中第几条
+        // user 发言。
         const nextSummary =
           summary && summary.trim()
-            ? `Turn ${turnCount} · ${truncateSummary(summary)}`
+            ? `第 ${turnCount} 步 · ${truncateSummary(summary)}`
             : s.summary;
         updated = {
           ...s,

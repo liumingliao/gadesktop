@@ -101,7 +101,7 @@ function AgentTurnView({
 }
 
 /**
- * "Turn N" header — sits above each agent turn's thinking summary
+ * Per-step header — sits above each agent turn's thinking summary
  * AND carries the chapter-break weight between turns now that
  * SoftHr is gone. Tuned for that double role:
  *   - mt-7 (28px) gives turn-to-turn breathing room comparable to
@@ -115,13 +115,20 @@ function AgentTurnView({
  *     register the product is aiming for.
  *   - 12px keeps it from competing with the thinking summary that
  *     follows.
- * The N is the GA-side turn index (one user message can produce
- * multiple agent turns), not the array position.
+ *
+ * Why "第 N 步" and not "第 N 轮": Chinese 「轮」 collides with
+ * conversational round (user message N), which is the natural
+ * mental model — users seeing "第 1 轮" on their second message
+ * would be confused. GA's turn is a finer-grained concept (one
+ * LLM call + tool dispatch cycle inside agent_runner_loop), and
+ * 「步」 (step) is the natural Chinese word for that level of
+ * granularity. The N is GA's turn_index (one user message can
+ * trigger multiple steps), not the array position.
  */
 export function TurnMarker({ index }: { index: number }) {
   return (
     <div className="mb-2 mt-7 font-serif text-[12px] italic text-ink-muted">
-      第 {index} 轮
+      第 {index} 步
     </div>
   );
 }

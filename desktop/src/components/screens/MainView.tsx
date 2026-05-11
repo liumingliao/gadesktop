@@ -230,7 +230,7 @@ export function MainView({
           {isRunning && !stillWaiting && !visiblePartial && (
             <ThinkingSummary>
               <>
-                {currentTurnIndex != null && `第 ${currentTurnIndex} 轮 · `}
+                {currentTurnIndex != null && `第 ${currentTurnIndex} 步 · `}
                 思考中…
               </>
             </ThinkingSummary>
