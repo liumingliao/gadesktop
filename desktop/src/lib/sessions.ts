@@ -43,16 +43,33 @@ export function deriveSessionStatus(
  * Apply `deriveSessionStatus` + the live `pendingApprovalCount` to a
  * Session, returning a row safe to feed into the Sidebar (which
  * renders these fields as static values).
+ *
+ * **Stable identity**: when neither the derived status nor the
+ * pending count changes, returns the input `session` object by
+ * reference. This is load-bearing for performance — combined with
+ * `useShallow` in the App.tsx selector, frequent runtime mutations
+ * like `inFlightContent` streaming (which don't affect status or
+ * pending count) no longer trigger Sidebar re-renders. Without
+ * this, every token of streaming output would invalidate every
+ * session row's identity and re-render the whole sidebar tree.
  */
 export function enrichSession(
   session: Session,
   runtime: SessionRuntime | undefined,
 ): Session {
   if (!runtime) return session;
+  const newStatus = deriveSessionStatus(session, runtime);
+  const newCount = runtime.pendingApprovals.length;
+  if (
+    session.status === newStatus &&
+    session.pendingApprovalCount === newCount
+  ) {
+    return session;
+  }
   return {
     ...session,
-    status: deriveSessionStatus(session, runtime),
-    pendingApprovalCount: runtime.pendingApprovals.length,
+    status: newStatus,
+    pendingApprovalCount: newCount,
   };
 }
 

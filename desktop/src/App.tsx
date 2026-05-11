@@ -1,4 +1,5 @@
 import { useEffect, useMemo } from "react";
+import { useShallow } from "zustand/react/shallow";
 
 import { ToastHost } from "@/components/error-card/ToastHost";
 import { Inspector } from "@/components/inspector/Inspector";
@@ -48,8 +49,22 @@ function App() {
   const inspectorVisible = useAppStore((s) => s.inspectorVisible);
   const toggleInspector = useAppStore((s) => s.toggleInspector);
 
-  const sessions = useAppStore((s) => s.sessions);
-  const runtimes = useAppStore((s) => s._runtimes);
+  // Sidebar shows live status by overlaying each session's
+  // per-session runtime (bridge state + agentRunning + pending
+  // approvals) on top of the persisted Session row. `useShallow`
+  // here is load-bearing for streaming performance: every token of
+  // turn_progress mutates `_runtimes` and would re-render App
+  // wholesale if we subscribed to `_runtimes` directly. The shallow
+  // comparator combined with stable identity in `enrichSession`
+  // means the selector only re-runs when a status / pending-count
+  // actually changes, not on every inFlightContent delta.
+  const enrichedSessions = useAppStore(
+    useShallow((s) =>
+      s.sessions.map((session) =>
+        enrichSession(session, s._runtimes[session.id]),
+      ),
+    ),
+  );
   const activeSessionId = useAppStore((s) => s.activeSessionId);
   const createSession = useAppStore((s) => s.createSession);
   const activateSession = useAppStore((s) => s.activateSession);
@@ -174,18 +189,12 @@ function App() {
   const isRunning =
     agentRunning || approvalDecisions["appr_demo1"] === "allow_once";
 
-  // Sidebar shows live status by overlaying each session's
-  // per-session runtime (bridge state + agentRunning + pending
-  // approvals) on top of the persisted Session row, so background
-  // sessions' pause / running / error states surface in their
-  // sidebar row even while the user is in another session.
-  const enrichedSessions = useMemo(
-    () => sessions.map((s) => enrichSession(s, runtimes[s.id])),
-    [sessions, runtimes],
-  );
-  // Sidebar full mode requires sessions; in the empty-state hero
-  // pre-first-message there's no session to highlight.
-  const visibleSessions = screen === "empty" ? [] : enrichedSessions;
+  // The enrichedSessions selector is defined above with useShallow;
+  // we always show history in the sidebar (including on the empty
+  // screen) so a user composing in "new chat" can still see and
+  // switch back to a prior session. Empty selection is signalled
+  // by activeSession being undefined, not by hiding the list.
+  const visibleSessions = enrichedSessions;
   const effectiveActiveId = screen === "main" ? activeSessionId : undefined;
   const activeSession = visibleSessions.find((s) => s.id === effectiveActiveId);
 
