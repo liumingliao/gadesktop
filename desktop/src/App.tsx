@@ -10,6 +10,7 @@ import { EmptyState } from "@/components/screens/EmptyState";
 import { MainView } from "@/components/screens/MainView";
 import { Onboarding } from "@/components/screens/onboarding/Onboarding";
 import { Settings } from "@/components/screens/settings/Settings";
+import { enrichSession } from "@/lib/sessions";
 import { cn } from "@/lib/utils";
 import {
   buildDemoPending,
@@ -48,6 +49,7 @@ function App() {
   const toggleInspector = useAppStore((s) => s.toggleInspector);
 
   const sessions = useAppStore((s) => s.sessions);
+  const runtimes = useAppStore((s) => s._runtimes);
   const activeSessionId = useAppStore((s) => s.activeSessionId);
   const createSession = useAppStore((s) => s.createSession);
   const activateSession = useAppStore((s) => s.activateSession);
@@ -172,11 +174,19 @@ function App() {
   const isRunning =
     agentRunning || approvalDecisions["appr_demo1"] === "allow_once";
 
+  // Sidebar shows live status by overlaying each session's
+  // per-session runtime (bridge state + agentRunning + pending
+  // approvals) on top of the persisted Session row, so background
+  // sessions' pause / running / error states surface in their
+  // sidebar row even while the user is in another session.
+  const enrichedSessions = useMemo(
+    () => sessions.map((s) => enrichSession(s, runtimes[s.id])),
+    [sessions, runtimes],
+  );
   // Sidebar full mode requires sessions; in the empty-state hero
   // pre-first-message there's no session to highlight.
-  const visibleSessions = screen === "empty" ? [] : sessions;
-  const effectiveActiveId =
-    screen === "main" ? (activeSessionId ?? "s-today-1") : undefined;
+  const visibleSessions = screen === "empty" ? [] : enrichedSessions;
+  const effectiveActiveId = screen === "main" ? activeSessionId : undefined;
   const activeSession = visibleSessions.find((s) => s.id === effectiveActiveId);
 
   // Onboarding takeover: no AppShell, no overlays besides the dev

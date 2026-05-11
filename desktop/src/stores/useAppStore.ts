@@ -200,6 +200,17 @@ interface Actions {
    * its sidebar row.
    */
   activateSession: (id: string) => Promise<void>;
+  /**
+   * Bump a session's turn_count + last_activity_at on turn_end and
+   * persist back to SQLite. Called from the IPC layer when a turn
+   * completes so Sidebar bucketing (today / week / earlier) and the
+   * "Turn N" badge reflect activity without a full reload.
+   *
+   * Status is set to "idle" — turn_end is the canonical "agent
+   * finished this round" signal; subsequent runs flip status back
+   * to "running" via setBridgeStatus + agentRunning.
+   */
+  bumpSessionAfterTurn: (sessionId: string) => void;
 
   // Approval (global)
   setApprovalRequiredTools: (tools: string[]) => void;
@@ -438,6 +449,32 @@ export const useAppStore = create<AppStore>((set, get) => ({
       );
     }
     return id;
+  },
+
+  bumpSessionAfterTurn: (sessionId) => {
+    const now = new Date().toISOString();
+    let updated: Session | null = null;
+    set((state) => ({
+      sessions: state.sessions.map((s) => {
+        if (s.id !== sessionId) return s;
+        updated = {
+          ...s,
+          turnCount: (s.turnCount ?? 0) + 1,
+          lastActivityAt: now,
+          updatedAt: now,
+          status: "idle",
+        };
+        return updated;
+      }),
+    }));
+    // Best-effort write-back to SQLite. Vite-only dev / first launch
+    // are non-fatal; the in-memory bump still drives sidebar rendering
+    // for the current app instance.
+    if (updated) {
+      void persistSession(updated).catch((e) => {
+        console.debug("[store] bumpSessionAfterTurn persistSession failed.", e);
+      });
+    }
   },
 
   activateSession: async (id) => {

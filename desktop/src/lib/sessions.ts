@@ -1,4 +1,60 @@
-import type { Session, SessionBucket } from "@/types/session";
+import type { SessionRuntime } from "@/stores/useAppStore";
+import type { Session, SessionBucket, SessionStatus } from "@/types/session";
+
+/**
+ * Derive the live session status by overlaying runtime state (from
+ * `_runtimes[id]`) onto the persisted Session row. Long-term states
+ * the user / persistence sets (`archived` / `completed` / `cancelled`)
+ * always win — they're "this is what this session IS", not "what's
+ * happening right now". The remaining states reflect what the bridge
+ * + agent are doing this second:
+ *
+ *   pendingApprovals.length > 0 → waiting_approval (highest priority —
+ *                                  drives the amber pause icon)
+ *   agentRunning                 → running         (apricot spinner)
+ *   bridgeStatus === "spawning"  → connecting      (subtle loader)
+ *   bridgeStatus === "error"     → error           (red dot)
+ *   otherwise                    → idle
+ *
+ * Used by Sidebar enrichment (in App.tsx) so per-row status icons
+ * + badges reflect background-session activity without each
+ * component poking at `_runtimes` directly.
+ */
+export function deriveSessionStatus(
+  session: Session,
+  runtime: SessionRuntime | undefined,
+): SessionStatus {
+  if (
+    session.status === "archived" ||
+    session.status === "completed" ||
+    session.status === "cancelled"
+  ) {
+    return session.status;
+  }
+  if (!runtime) return session.status;
+  if (runtime.pendingApprovals.length > 0) return "waiting_approval";
+  if (runtime.agentRunning) return "running";
+  if (runtime.bridgeStatus === "spawning") return "connecting";
+  if (runtime.bridgeStatus === "error") return "error";
+  return "idle";
+}
+
+/**
+ * Apply `deriveSessionStatus` + the live `pendingApprovalCount` to a
+ * Session, returning a row safe to feed into the Sidebar (which
+ * renders these fields as static values).
+ */
+export function enrichSession(
+  session: Session,
+  runtime: SessionRuntime | undefined,
+): Session {
+  if (!runtime) return session;
+  return {
+    ...session,
+    status: deriveSessionStatus(session, runtime),
+    pendingApprovalCount: runtime.pendingApprovals.length,
+  };
+}
 
 /**
  * Compute which sidebar bucket a session falls into.

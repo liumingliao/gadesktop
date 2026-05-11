@@ -112,6 +112,10 @@ export function dispatchIPCEvent(
       // self-contained — anyone tracing event flow without reading
       // the store action sees the state transition explicitly.
       s.setAgentRunning(event.sessionId, false);
+      // Update the session row (turn_count + last_activity_at) so
+      // the Sidebar bucketing + "Turn N" badge stay current across
+      // app restarts. SQLite write is best-effort.
+      s.bumpSessionAfterTurn(event.sessionId);
       // Best-effort SQLite double-write. Silently swallow when the
       // backend isn't available (Vite dev / first launch / migration).
       void persistTurnEndToMessages(event);
