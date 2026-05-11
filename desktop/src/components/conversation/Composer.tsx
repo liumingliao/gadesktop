@@ -1,7 +1,7 @@
 import * as Popover from "@radix-ui/react-popover";
 import {
   ArrowUp,
-  CaretDown,
+  CaretUp,
   Check,
   Cube,
   Plus,
@@ -256,7 +256,7 @@ function LLMPill({
       >
         <Cube size={13} weight="thin" className="text-ink-muted" />
         <span>{llmDisplayName}</span>
-        <CaretDown size={10} weight="thin" className="text-ink-muted" />
+        <CaretUp size={10} weight="thin" className="text-ink-muted" />
       </button>
     );
   }
@@ -272,7 +272,7 @@ function LLMPill({
         >
           <Cube size={13} weight="thin" className="text-ink-muted" />
           <span>{llmDisplayName}</span>
-          <CaretDown size={10} weight="thin" className="text-ink-muted" />
+          <CaretUp size={10} weight="thin" className="text-ink-muted" />
         </button>
       </Popover.Trigger>
       <Popover.Portal>

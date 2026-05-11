@@ -113,6 +113,54 @@ export async function deleteSession(id: string): Promise<void> {
   await db.execute("DELETE FROM sessions WHERE id = $1", [id]);
 }
 
+/**
+ * Sweep "absolutely empty" sessions on launch — title still at the
+ * default "新对话" seed AND no turns have happened yet. These are
+ * the residue of opening the app, getting an auto-created session,
+ * and closing without ever sending a message. Without cleanup they
+ * pile up indefinitely in the sidebar and crowd out real
+ * conversations.
+ *
+ * Sessions with a user-edited title are preserved even at
+ * turn_count=0 (the user might be coming back to a planned chat
+ * that hasn't started yet). Archived sessions are also preserved
+ * — the user chose to keep them visible somewhere.
+ *
+ * Returns the number of rows deleted, so callers can log it for
+ * debugging cleanups that prune more than expected.
+ */
+export async function deleteEmptyNewSessions(): Promise<number> {
+  const db = await getDB();
+  // tauri-plugin-sql's execute returns { rowsAffected, lastInsertId }.
+  const result = await db.execute(
+    `DELETE FROM sessions
+     WHERE title = '新对话'
+       AND turn_count = 0
+       AND status != 'archived'`,
+  );
+  return result.rowsAffected ?? 0;
+}
+
+/**
+ * One-time migration: delete the v0.1 demo session fixtures
+ * (`stores/demo.ts` DEMO_SESSIONS) from SQLite. Earlier hydrate
+ * logic seeded these on first launch as visual placeholders for
+ * the empty sidebar. Stage 3 ships real Session Restore +
+ * onboarding, so the placeholders are now pure noise. Safe to
+ * call repeatedly — `DELETE ... WHERE id IN (...)` is idempotent.
+ *
+ * Returns rows deleted, primarily for debug logging.
+ */
+export async function deleteDemoSessions(): Promise<number> {
+  const db = await getDB();
+  const result = await db.execute(
+    `DELETE FROM sessions
+     WHERE id IN ('s-today-1','s-today-2','s-today-3',
+                  's-week-1','s-week-2','s-earlier-1')`,
+  );
+  return result.rowsAffected ?? 0;
+}
+
 // ---------------- projects ----------------
 
 export async function loadProjects(): Promise<Project[]> {

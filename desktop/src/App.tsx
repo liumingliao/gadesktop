@@ -102,23 +102,14 @@ function App() {
     hydrateFromDB();
   }, [hydrateFromDB]);
 
-  // Auto-create + activate a session whenever the user lands on the
-  // empty screen without one. Two paths in:
-  //   1. App start (initial screen = "empty"): users without any
-  //      existing session get a fresh one + a bridge that starts
-  //      spawning in the background, so by the time they type a
-  //      message bridgeStatus is closer to "connected".
-  //   2. After "新 chat" click (which calls createSession itself —
-  //      this useEffect is then a no-op because activeSessionId is
-  //      already set).
-  // Skipped on the onboarding screen so the path picker can complete
-  // first without a stale session getting created behind it.
-  useEffect(() => {
-    if (screen === "empty" && !activeSessionId) {
-      const id = createSession();
-      void activateSession(id);
-    }
-  }, [screen, activeSessionId, createSession, activateSession]);
+  // Session creation is **lazy** — we no longer auto-create on
+  // landing in the empty screen. Earlier versions did, which
+  // accumulated piles of "新对话" rows every time the user opened
+  // and closed the app without ever typing. The Composer's
+  // onSubmit handles createSession + activate at the moment the
+  // user actually has intent. Sidebar's "New Chat" button still
+  // creates an explicit session immediately, because that click
+  // *is* the intent.
 
   // Global keyboard shortcuts: ⌘K palette, ⌘, settings, ⌘E inspector,
   // ⌘N new chat. Esc handled by Radix Dialog (Settings) and cmdk
@@ -289,46 +280,26 @@ function App() {
               }}
               onOpenLLMSwitcher={() => setPaletteOpen(true)}
               onSubmit={(t) => {
-                // activeSessionId is guaranteed non-null here by the
-                // auto-create-on-empty useEffect above. Defensive
-                // check anyway, in case of an edge race during very
-                // first paint.
-                if (!activeSessionId) {
-                  console.warn(
-                    "[empty] submit fired before session auto-create resolved",
-                  );
-                  return;
-                }
-                if (bridgeStatus === "connected") {
-                  appendUserTurn(activeSessionId, t);
-                  sendIPCCommand(activeSessionId, {
-                    kind: "user_message",
-                    text: t,
-                    images: [],
-                  });
-                } else {
-                  console.info("[empty] submit (bridge not ready):", t);
-                }
-                setScreen("main");
+                void submitOnEmpty(
+                  t,
+                  activeSessionId,
+                  createSession,
+                  activateSession,
+                  appendUserTurn,
+                  sendIPCCommand,
+                  setScreen,
+                );
               }}
               onQuickPrompt={(p) => {
-                if (!activeSessionId) {
-                  console.warn(
-                    "[empty] quick-prompt fired before session auto-create resolved",
-                  );
-                  return;
-                }
-                if (bridgeStatus === "connected") {
-                  appendUserTurn(activeSessionId, p);
-                  sendIPCCommand(activeSessionId, {
-                    kind: "user_message",
-                    text: p,
-                    images: [],
-                  });
-                } else {
-                  console.info("[empty] quick-prompt (bridge not ready):", p);
-                }
-                setScreen("main");
+                void submitOnEmpty(
+                  p,
+                  activeSessionId,
+                  createSession,
+                  activateSession,
+                  appendUserTurn,
+                  sendIPCCommand,
+                  setScreen,
+                );
               }}
             />
           ) : (
@@ -501,6 +472,54 @@ function App() {
 }
 
 export default App;
+
+// ---------------- Lazy session creation ----------------
+
+/**
+ * Empty-screen submit handler. The session is created lazily — the
+ * first user-initiated action (typing a message or clicking a quick
+ * prompt) is what bumps us from "no chat yet" to "real chat".
+ *
+ * Flow:
+ *   1. If there's already an active session id, reuse it.
+ *   2. Otherwise createSession + activateSession (which awaits the
+ *      bridge spawn). Bridge `ready` event arrives shortly after;
+ *      sendIPCCommand can write to stdin as soon as the process is
+ *      spawned (bridge's command queue buffers until ready).
+ *   3. Append the user turn locally and send the IPC message.
+ *   4. Transition to main view so the user sees the thinking
+ *      placeholder appear under their message.
+ *
+ * No bridgeStatus gate — the bridge may still be "spawning" when we
+ * call sendIPCCommand, but the underlying tauri Command.create has
+ * already returned a writable stdin. Bridge processes commands in
+ * FIFO order, so user_message lands right after the spawn handshake.
+ */
+async function submitOnEmpty(
+  text: string,
+  existingId: string | undefined,
+  createSession: () => string,
+  activateSession: (id: string) => Promise<void>,
+  appendUserTurn: (sessionId: string, text: string) => void,
+  sendIPCCommand: (
+    sessionId: string,
+    cmd: { kind: "user_message"; text: string; images?: string[] },
+  ) => Promise<void>,
+  setScreen: (s: import("@/stores/useAppStore").Screen) => void,
+): Promise<void> {
+  let id = existingId;
+  if (!id) {
+    id = createSession();
+    await activateSession(id);
+  }
+  setScreen("main");
+  appendUserTurn(id, text);
+  await sendIPCCommand(id, {
+    kind: "user_message",
+    text,
+    images: [],
+  });
+}
 
 // ---------------- Settings path pickers ----------------
 //

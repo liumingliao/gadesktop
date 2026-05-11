@@ -7,6 +7,8 @@ import {
   spawnBridge as spawnBridgeProcess,
 } from "@/lib/bridge";
 import {
+  deleteDemoSessions,
+  deleteEmptyNewSessions,
   getPref,
   loadMessagesBySession,
   loadSessions,
@@ -851,9 +853,11 @@ export const useAppStore = create<AppStore>((set, get) => ({
   archiveSession: (sessionId) => {
     const now = new Date().toISOString();
     let updated: Session | null = null;
+    let archivedTitle = "";
     set((state) => {
       const sessions = state.sessions.map((s) => {
         if (s.id !== sessionId) return s;
+        archivedTitle = s.title;
         updated = { ...s, status: "archived", updatedAt: now };
         return updated;
       });
@@ -869,6 +873,21 @@ export const useAppStore = create<AppStore>((set, get) => ({
       void persistSession(updated).catch((e) => {
         console.debug("[store] archiveSession persistSession failed.", e);
       });
+      // UX feedback: archiving makes the row vanish from the
+      // sidebar, which on its own reads as "did anything happen?".
+      // A short info toast confirms the action — eventually V0.2
+      // upgrades this to include an Undo affordance.
+      get().pushToast(
+        makeAppError({
+          category: "business",
+          severity: "info",
+          message: `已 Archive · ${archivedTitle}`,
+          hint: null,
+          retryable: false,
+          context: "archiveSession",
+          traceback: null,
+        }),
+      );
     }
   },
 
@@ -1340,13 +1359,48 @@ export const useAppStore = create<AppStore>((set, get) => ({
   // launch before tauri-plugin-sql finishes init).
   hydrateFromDB: async () => {
     try {
-      const sessions = await loadSessions();
-      if (sessions.length === 0) {
-        await Promise.all(DEMO_SESSIONS.map(persistSession));
-        // Initial state already has DEMO_SESSIONS — no setState needed.
-      } else {
-        set({ sessions });
+      // Sweep accumulated empty "新对话" rows from prior launches —
+      // each auto-created session that the user never typed into
+      // would otherwise stick around forever and crowd the sidebar.
+      // Done before loadSessions so the in-memory list reflects the
+      // cleanup state.
+      try {
+        const removed = await deleteEmptyNewSessions();
+        if (removed > 0) {
+          console.info(
+            `[store] hydrateFromDB: pruned ${removed} empty 新对话 row(s).`,
+          );
+        }
+      } catch (e) {
+        console.debug(
+          "[store] hydrateFromDB: deleteEmptyNewSessions failed.",
+          e,
+        );
       }
+      // One-time cleanup of the v0.1 demo placeholder sessions
+      // (s-today-* / s-week-* / s-earlier-* from stores/demo.ts).
+      // Stage 3 ships real onboarding + restore, so these
+      // hard-coded fixtures are pure noise. Idempotent — safe to
+      // run on every launch.
+      try {
+        const removed = await deleteDemoSessions();
+        if (removed > 0) {
+          console.info(
+            `[store] hydrateFromDB: pruned ${removed} legacy demo session(s).`,
+          );
+        }
+      } catch (e) {
+        console.debug(
+          "[store] hydrateFromDB: deleteDemoSessions failed.",
+          e,
+        );
+      }
+      const sessions = await loadSessions();
+      // No demo-seed on first launch. DEMO_SESSIONS stay as the
+      // in-memory initial state for the brief moment before
+      // hydrate resolves; if the user has zero real sessions, the
+      // sidebar shows its empty-state hint and prompts a "New chat".
+      set({ sessions });
     } catch (e) {
       // Non-Tauri context (Vite dev) or migration not yet applied.
       console.warn(
