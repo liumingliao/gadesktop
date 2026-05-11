@@ -757,6 +757,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
         makeAppError({
           category: "business",
           severity: "warning",
+          title: "Session 数量较多",
           message: `已开 ${totalNow} 个 session — 建议先 archive 几个旧的，否则后台 bridge 进程会越来越占资源。`,
           hint: null,
           retryable: false,
@@ -881,7 +882,8 @@ export const useAppStore = create<AppStore>((set, get) => ({
         makeAppError({
           category: "business",
           severity: "info",
-          message: `已 Archive · ${archivedTitle}`,
+          title: "已 Archive",
+          message: archivedTitle,
           hint: null,
           retryable: false,
           context: "archiveSession",
@@ -1006,7 +1008,8 @@ export const useAppStore = create<AppStore>((set, get) => ({
         makeAppError({
           category: "business",
           severity: "info",
-          message: "已保存路径配置 · 重启 Workbench 才能让现有 session 生效",
+          title: "已保存路径配置",
+          message: "重启 Workbench 才能让现有 session 生效",
           hint: null,
           retryable: false,
           context: "setGAConfig",

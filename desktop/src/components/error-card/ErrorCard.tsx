@@ -63,7 +63,13 @@ export function ErrorCard({
   const sev = SEVERITY_CONFIG[error.severity];
   const hintCfg = error.hint ? HINT_CONFIG[error.hint] : null;
 
-  const title = hintCfg?.title ?? defaultTitle(error);
+  // Title resolution order:
+  //   1. error.title — explicit override (positive-feedback toasts
+  //      set this so "已 Archive" doesn't render as "操作未能完成").
+  //   2. hintCfg.title — tailored copy for known error hints
+  //      (check_llm_config / network / quota_exceeded).
+  //   3. defaultTitle(error) — category-flavored fallback.
+  const title = error.title ?? hintCfg?.title ?? defaultTitle(error);
   const brief = hintCfg?.brief ?? error.message;
   const actions = hintCfg?.actions ?? defaultActions(error);
 

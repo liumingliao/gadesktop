@@ -58,6 +58,7 @@ function App() {
   const activeSessionId = useAppStore((s) => s.activeSessionId);
   const createSession = useAppStore((s) => s.createSession);
   const activateSession = useAppStore((s) => s.activateSession);
+  const setActiveSession = useAppStore((s) => s.setActiveSession);
   const archiveSession = useAppStore((s) => s.archiveSession);
   const llms = useAppStore((s) => s.llms);
   const llmDisplayName = useAppStore((s) => s.llmDisplayName);
@@ -246,12 +247,14 @@ function App() {
             sessions={visibleSessions}
             activeId={effectiveActiveId}
             onNewChat={() => {
-              // Create a fresh session row + activate (spawns the
-              // bridge) before switching the screen, so by the time
-              // the user finishes typing their first message the
-              // GA process is closer to ready.
-              const id = createSession();
-              void activateSession(id);
+              // Lazy: New Chat just clears the active selection and
+              // shows the empty composer. No session row is created
+              // until the user actually submits — otherwise every
+              // click on this button piles up another "新对话"
+              // placeholder in the sidebar. submitOnEmpty does the
+              // createSession + activateSession when the user
+              // commits to a first message.
+              setActiveSession(undefined);
               setScreen("empty");
             }}
             onSelectSession={(id) => {

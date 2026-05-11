@@ -28,6 +28,14 @@ export interface AppError {
   id: string;
   category: AppErrorCategory;
   severity: AppErrorSeverity;
+  /**
+   * Optional explicit title. When omitted, ErrorCard falls back to
+   * `defaultTitle(error)` — which is error-flavored ("操作未能完成"
+   * for business, "Bridge 错误" for bridge, etc). Positive-feedback
+   * toasts (severity=info) should set this so the header reads
+   * sensibly. For real bridge / IPC errors, leave undefined.
+   */
+  title?: string;
   message: string;
   hint: AppErrorHint | null;
   retryable: boolean;
