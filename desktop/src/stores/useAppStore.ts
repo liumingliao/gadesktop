@@ -34,16 +34,23 @@ import type { ApprovalDecision, IPCCommand } from "@/types/ipc";
 import type { Session } from "@/types/session";
 
 /**
- * Module-level reference to the active bridge subprocess. Bridge
- * client objects aren't serializable (hold function refs to write/
- * kill), so they live outside the Zustand state. The store's
- * `bridgeStatus` field remains the source of truth for "is bridge
- * alive"; this ref is just the IO handle.
+ * Multi-session bridge subprocess map (V0.1 #10b N-active model).
+ *
+ * Each entry is one live GA bridge process keyed by sessionId.
+ * Bridge clients aren't serializable (hold function refs to write/
+ * kill), so they live outside the Zustand state. Per-session
+ * `bridgeStatus` / `bridgeError` / `bridgePid` inside `_runtimes`
+ * are the source of truth for "is this session's bridge alive";
+ * this map is just the IO handle store.
+ *
+ * Background-session continuity is the core v0.1 promise: switching
+ * the active session does NOT kill other sessions' bridges. App
+ * shutdown calls `shutdownAllBridges` to clean up.
  */
-let _bridgeClient: BridgeClient | null = null;
+const _bridgeClients = new Map<string, BridgeClient>();
 
-export function getBridgeClient(): BridgeClient | null {
-  return _bridgeClient;
+export function getBridgeClient(sessionId: string): BridgeClient | null {
+  return _bridgeClients.get(sessionId) ?? null;
 }
 
 export type Screen = "onboarding" | "empty" | "main";
@@ -61,6 +68,43 @@ export type BridgeStatus =
   | "closed"
   | "error";
 
+/**
+ * All per-session runtime fields. The store maintains one entry per
+ * session in `_runtimes`; the top-level projection fields below
+ * mirror `_runtimes[activeSessionId]` so existing component read
+ * paths (`s.turns`, `s.pendingApprovals`, ...) keep working without
+ * changes. Writes go through `applyRuntimeUpdate`, which updates
+ * both the internal map and the projection when the targeted
+ * session is active.
+ */
+export interface SessionRuntime {
+  turns: Turn[];
+  pendingApprovals: PendingApproval[];
+  agentRunning: boolean;
+  currentTurnIndex: number | null;
+  userSubmitTick: number;
+  inFlightContent: string;
+  approvalDecisions: Record<string, ApprovalDecision>;
+  bridgeStatus: BridgeStatus;
+  bridgeError: string | null;
+  bridgePid: number | null;
+}
+
+function emptyRuntime(): SessionRuntime {
+  return {
+    turns: [],
+    pendingApprovals: [],
+    agentRunning: false,
+    currentTurnIndex: null,
+    userSubmitTick: 0,
+    inFlightContent: "",
+    approvalDecisions: {},
+    bridgeStatus: "idle",
+    bridgeError: null,
+    bridgePid: null,
+  };
+}
+
 interface State {
   // ---- UI ----
   screen: Screen;
@@ -75,71 +119,52 @@ interface State {
   llmDisplayName: string;
   runtimeInfo: RuntimeInfo;
 
-  // ---- Conversation (V0.1: single active session) ----
+  // ---- Approval (global) ----
+  approvalConfig: ApprovalConfig;
+  approvalRecords: ApprovalRecord[];
+  /**
+   * YOLO mode (PRD §11.5). When true, every tool dispatch on every
+   * alive bridge bypasses the approval gate. Persisted to prefs
+   * (sticky across launches). Global, not per-session — flipping
+   * this notifies every alive bridge.
+   */
+  yoloMode: boolean;
+
+  // ---- Errors (global) ----
+  toasts: AppError[];
+
+  // ---- Per-session runtimes (internal, keyed by sessionId) ----
+  /**
+   * Internal map of per-session runtime state. Components should
+   * normally read the top-level projection fields below (mirror of
+   * the active session). Read `_runtimes` directly only when you
+   * need state from sessions other than the active one — e.g.
+   * Sidebar rendering pending-approval badges across all sessions.
+   */
+  _runtimes: Record<string, SessionRuntime>;
+
+  // ---- Projection of _runtimes[activeSessionId] ----
+  // These fields exist for read-path back-compat with the V0.1 #10a
+  // single-session layer. Writers must keep them synced via
+  // `applyRuntimeUpdate`. Components that only care about the
+  // active session can keep reading these as before.
   turns: Turn[];
   pendingApprovals: PendingApproval[];
-  /**
-   * The agent is mid-run: user message dispatched, no `turn_end`
-   * received yet. Drives the inline "思考中…" placeholder
-   * (DESIGN.md §4.3 Thinking Placeholder) and the Composer's
-   * Stop-button mode so the user has feedback during LLM TTFT
-   * (which can be 3-15s on cold starts). Set true synchronously
-   * by `appendUserTurn` (we don't wait for `turn_start` to come
-   * back across IPC); cleared by `turn_end` / `error` /
-   * `run_complete`.
-   */
   agentRunning: boolean;
   /**
-   * GA-side turn number currently running (1-based). One user
-   * message can drive multiple agent turns — each LLM call +
-   * dispatch is one. Set when `turn_start` arrives, cleared on
-   * `run_complete` / `error`. Lets the thinking placeholder show
-   * "Turn 3 · 思考中…" so users can track progress on long tasks.
-   * `null` when no turn is in flight.
+   * GA-side turn number currently running (1-based) for the active
+   * session. See SessionRuntime for the same field's semantics.
    */
   currentTurnIndex: number | null;
   /**
    * Monotonic counter incremented every time the user submits a
-   * message (via `appendUserTurn`). MainView's scroll effect uses
-   * this as a trigger to snap the just-submitted user message to
-   * the viewport top — keying on `turns.length` would over-fire
-   * (every turn_end would scroll), keying on a derived value would
-   * miss back-to-back submits with the same content. A counter
-   * that only the submit path touches is the cleanest signal.
+   * message on the active session (via `appendUserTurn`). MainView's
+   * scroll effect uses this as a trigger to snap the just-submitted
+   * user message to the viewport top.
    */
   userSubmitTick: number;
-  /**
-   * LLM streaming partial output, mid-turn (DESIGN.md §4.3 streaming
-   * generation). Bridge forwards GA's `display_queue` chunks as
-   * `turn_progress` IPC events; the handler appends `delta` here.
-   * MainView renders this — after passing through the partial-tag
-   * stripper — as the in-flight reply's body so the user sees
-   * tokens appear as they're generated.
-   *
-   * Cleared when:
-   *   - turn_end arrives (the canonical AgentTurn replaces the
-   *     in-flight render)
-   *   - run_complete / error
-   *   - user submits the next message (appendUserTurn)
-   */
   inFlightContent: string;
-
-  // ---- Approval ----
   approvalDecisions: Record<string, ApprovalDecision>;
-  approvalConfig: ApprovalConfig;
-  approvalRecords: ApprovalRecord[];
-  /**
-   * YOLO mode (PRD §11.5). When true, every tool dispatch on the
-   * bridge bypasses the approval gate. Persisted to prefs (sticky
-   * across launches). The TopBar must show a persistent indicator
-   * while this is on (DESIGN.md §4.1).
-   */
-  yoloMode: boolean;
-
-  // ---- Errors ----
-  toasts: AppError[];
-
-  // ---- Bridge runtime ----
   bridgeStatus: BridgeStatus;
   bridgeError: string | null;
   bridgePid: number | null;
@@ -158,19 +183,15 @@ interface Actions {
   // Sessions
   setActiveSession: (id: string | undefined) => void;
 
-  // Approval
-  recordApprovalDecision: (
-    approvalId: string,
-    decision: ApprovalDecision,
-  ) => void;
+  // Approval (global)
   setApprovalRequiredTools: (tools: string[]) => void;
   removeAlwaysAllow: (scope: "project" | "global", tool: string) => void;
-
   /**
-   * Set the YOLO mode flag. Persists to prefs and notifies the bridge
-   * over IPC if one is alive. The Settings UI is responsible for
-   * showing the activation confirm modal (DESIGN.md §9 Approval tab)
-   * before calling this with `true`; the store does not gate it.
+   * Set the YOLO mode flag. Persists to prefs and broadcasts the new
+   * state to **every** alive bridge over IPC. The Settings UI is
+   * responsible for showing the activation confirm modal (DESIGN.md
+   * §9 Approval tab) before calling this with `true`; the store
+   * does not gate it.
    */
   setYoloMode: (enabled: boolean) => Promise<void>;
 
@@ -178,25 +199,38 @@ interface Actions {
   pushToast: (e: AppError) => void;
   dismissToast: (id: string) => void;
 
-  // LLMs (replaceLLMs is called by ipc-handlers on ready/llm_changed)
+  // LLMs (replaceLLMs is called by ipc-handlers on ready / llm_changed)
   replaceLLMs: (llms: LLMOption[]) => void;
 
-  // Conversation
-  appendUserTurn: (text: string) => void;
-  appendAgentTurn: (turn: AgentTurn) => void;
-  addPendingApproval: (p: PendingApproval) => void;
-  removePendingApproval: (approvalId: string) => void;
-  clearConversation: () => void;
-  setAgentRunning: (running: boolean) => void;
-  setCurrentTurnIndex: (idx: number | null) => void;
-  appendInFlightDelta: (delta: string) => void;
-  clearInFlightContent: () => void;
+  // Conversation (per-session — sessionId required)
+  appendUserTurn: (sessionId: string, text: string) => void;
+  appendAgentTurn: (sessionId: string, turn: AgentTurn) => void;
+  addPendingApproval: (sessionId: string, p: PendingApproval) => void;
+  removePendingApproval: (sessionId: string, approvalId: string) => void;
+  recordApprovalDecision: (
+    sessionId: string,
+    approvalId: string,
+    decision: ApprovalDecision,
+  ) => void;
+  clearConversation: (sessionId: string) => void;
+  setAgentRunning: (sessionId: string, running: boolean) => void;
+  setCurrentTurnIndex: (sessionId: string, idx: number | null) => void;
+  appendInFlightDelta: (sessionId: string, delta: string) => void;
+  clearInFlightContent: (sessionId: string) => void;
 
-  // Bridge runtime
-  setBridgeStatus: (status: BridgeStatus) => void;
+  // Bridge runtime (per-session — sessionId required)
+  setBridgeStatus: (sessionId: string, status: BridgeStatus) => void;
+  /**
+   * Spawn a GA bridge subprocess for `args.sessionId`. If that
+   * session already has an alive bridge, this shuts it down first
+   * (one process per sessionId). Other sessions' bridges are
+   * untouched — that's the multi-session core promise.
+   */
   spawnBridge: (args: BridgeSpawnArgs) => Promise<void>;
-  shutdownBridge: () => Promise<void>;
-  sendIPCCommand: (cmd: IPCCommand) => Promise<void>;
+  shutdownBridge: (sessionId: string) => Promise<void>;
+  /** Shutdown every alive bridge. Used on app exit. */
+  shutdownAllBridges: () => Promise<void>;
+  sendIPCCommand: (sessionId: string, cmd: IPCCommand) => Promise<void>;
 
   // Persistence
   hydrateFromDB: () => Promise<void>;
@@ -205,19 +239,81 @@ interface Actions {
 export type AppStore = State & Actions;
 
 /**
+ * Helper: apply an updater to a single session's runtime, and
+ * refresh the top-level projection when that session is the active
+ * one. Returns a partial state to be passed to Zustand's `set`.
+ *
+ * Lazily initializes the runtime entry if missing — the IPC layer
+ * may emit events (turn_start, turn_progress, tool_call_pending)
+ * for a session that the store hasn't seen yet (e.g., a bridge
+ * spawn started but the runtime wasn't pre-seeded). We accept
+ * those updates rather than dropping them.
+ */
+function applyRuntimeUpdate(
+  state: State,
+  sessionId: string,
+  updater: (rt: SessionRuntime) => SessionRuntime,
+): Partial<State> {
+  const oldRt = state._runtimes[sessionId] ?? emptyRuntime();
+  const newRt = updater(oldRt);
+  const out: Partial<State> = {
+    _runtimes: { ...state._runtimes, [sessionId]: newRt },
+  };
+  if (sessionId === state.activeSessionId) {
+    Object.assign(out, projectionFrom(newRt));
+  }
+  return out;
+}
+
+/**
+ * Pure mapping from a SessionRuntime to the State projection fields.
+ * Used by setActiveSession + applyRuntimeUpdate to keep the top-level
+ * fields in sync with `_runtimes[activeSessionId]`.
+ */
+function projectionFrom(rt: SessionRuntime): {
+  turns: Turn[];
+  pendingApprovals: PendingApproval[];
+  agentRunning: boolean;
+  currentTurnIndex: number | null;
+  userSubmitTick: number;
+  inFlightContent: string;
+  approvalDecisions: Record<string, ApprovalDecision>;
+  bridgeStatus: BridgeStatus;
+  bridgeError: string | null;
+  bridgePid: number | null;
+} {
+  return {
+    turns: rt.turns,
+    pendingApprovals: rt.pendingApprovals,
+    agentRunning: rt.agentRunning,
+    currentTurnIndex: rt.currentTurnIndex,
+    userSubmitTick: rt.userSubmitTick,
+    inFlightContent: rt.inFlightContent,
+    approvalDecisions: rt.approvalDecisions,
+    bridgeStatus: rt.bridgeStatus,
+    bridgeError: rt.bridgeError,
+    bridgePid: rt.bridgePid,
+  };
+}
+
+/**
  * Single Zustand store. We intentionally keep one store rather than
- * splitting per domain — the surface stays small enough at V0.1 that
- * a slice-pattern would be ceremony without payoff.
+ * splitting per domain — the surface stays small enough at V0.1
+ * that a slice-pattern would be ceremony without payoff.
  *
- * #10 wires bridge IPC events into these same actions:
- *   - turn_end          → updates conversation turns (when added)
- *   - tool_call_pending → appends a pending approval entry
- *   - approval_response → recordApprovalDecision
- *   - error             → pushToast (after fromIPCError)
- *   - llm_changed       → updates llms[]
+ * #10b wires bridge IPC events into these actions via
+ * `event.sessionId` routing (every wire event carries sessionId):
+ *   - turn_end          → appendAgentTurn(sessionId, ...)
+ *   - turn_start        → setCurrentTurnIndex(sessionId, ...)
+ *   - turn_progress     → appendInFlightDelta(sessionId, ...)
+ *   - tool_call_pending → addPendingApproval(sessionId, ...)
+ *   - error             → pushToast (global) + setAgentRunning(sessionId, false)
+ *   - run_complete      → setAgentRunning(sessionId, false)
+ *   - llm_changed       → replaceLLMs (global — LLM list is shared)
+ *   - ready             → replaceLLMs + setBridgeStatus(sessionId, "connected")
  *
- * The initial state is seeded with demo fixtures so the dev build has
- * something to render before bridge is connected.
+ * The initial state is seeded with demo fixtures so the dev build
+ * has something to render before bridge is connected.
  */
 export const useAppStore = create<AppStore>((set, get) => ({
   // ---- Initial state (demo fixtures) ----
@@ -232,23 +328,17 @@ export const useAppStore = create<AppStore>((set, get) => ({
   llmDisplayName: DEMO_LLM_DISPLAY_NAME,
   runtimeInfo: DEMO_RUNTIME_INFO,
 
-  approvalDecisions: {},
   approvalConfig: DEMO_APPROVAL_CONFIG,
   approvalRecords: DEMO_APPROVAL_RECORDS,
   yoloMode: false,
 
-  turns: [],
-  pendingApprovals: [],
-  agentRunning: false,
-  currentTurnIndex: null,
-  userSubmitTick: 0,
-  inFlightContent: "",
-
   toasts: [],
 
-  bridgeStatus: "idle",
-  bridgeError: null,
-  bridgePid: null,
+  _runtimes: {},
+
+  // Top-level projection starts as the empty runtime (no active
+  // session yet). setActiveSession refreshes these.
+  ...projectionFrom(emptyRuntime()),
 
   // ---- UI actions ----
   setScreen: (s) => set({ screen: s }),
@@ -260,33 +350,29 @@ export const useAppStore = create<AppStore>((set, get) => ({
   toggleInspector: () => set({ inspectorVisible: !get().inspectorVisible }),
 
   // ---- Sessions actions ----
-  setActiveSession: (id) => set({ activeSessionId: id }),
+  setActiveSession: (id) =>
+    set((state) => {
+      if (!id) {
+        return {
+          activeSessionId: undefined,
+          ...projectionFrom(emptyRuntime()),
+        };
+      }
+      // Lazy-init the runtime so subsequent setters can operate on
+      // the initialized entry rather than fall through to emptyRuntime.
+      const existing = state._runtimes[id];
+      const rt = existing ?? emptyRuntime();
+      const _runtimes = existing
+        ? state._runtimes
+        : { ...state._runtimes, [id]: rt };
+      return {
+        activeSessionId: id,
+        _runtimes,
+        ...projectionFrom(rt),
+      };
+    }),
 
-  // ---- Approval actions ----
-  recordApprovalDecision: (approvalId, decision) => {
-    set((state) => ({
-      approvalDecisions: {
-        ...state.approvalDecisions,
-        [approvalId]: decision,
-      },
-    }));
-    // Best-effort SQLite double-write for the approval audit trail.
-    // The matching `pending` row was written when tool_call_pending
-    // arrived (see ipc-handlers.persistToolEventPendingFromIPC); this
-    // update fills in approval_decision + terminal status. Silently
-    // swallows when SQLite isn't available (Vite-only dev).
-    void persistToolEventApprovalDecision(
-      approvalId,
-      decision,
-      new Date().toISOString(),
-    ).catch((e) => {
-      console.debug(
-        "[store] persistToolEventApprovalDecision failed.",
-        e,
-      );
-    });
-  },
-
+  // ---- Approval (global) ----
   setApprovalRequiredTools: (tools) =>
     set((state) => ({
       approvalConfig: { ...state.approvalConfig, requiredTools: tools },
@@ -314,24 +400,24 @@ export const useAppStore = create<AppStore>((set, get) => ({
   setYoloMode: async (enabled) => {
     set({ yoloMode: enabled });
     // Best-effort persist: SQLite may be absent in Vite-only dev. The
-    // in-memory state still drives UI + IPC for the current session.
+    // in-memory state still drives UI + IPC for the current launch.
     try {
       await setPref("yolo_mode", enabled);
     } catch (e) {
       console.warn("[store] setYoloMode: pref persistence failed.", e);
     }
-    // Notify the bridge if one is alive. If not, the next bridge spawn
-    // syncs via the on-`ready` handler in lib/ipc-handlers.ts.
-    if (_bridgeClient) {
+    // YOLO is global — notify every alive bridge. Sessions spawned
+    // later sync via the on-`ready` handler in ipc-handlers.ts.
+    for (const [sid, client] of _bridgeClients) {
       try {
-        await _bridgeClient.send({ kind: "set_yolo_mode", enabled });
+        await client.send({ kind: "set_yolo_mode", enabled });
       } catch (e) {
-        console.warn("[store] setYoloMode: bridge notify failed.", e);
+        console.warn(`[store] setYoloMode: bridge ${sid} notify failed.`, e);
       }
     }
   },
 
-  // ---- Errors actions ----
+  // ---- Errors ----
   pushToast: (e) =>
     set((state) => ({
       toasts: [e, ...state.toasts.filter((t) => t.id !== e.id)],
@@ -345,124 +431,245 @@ export const useAppStore = create<AppStore>((set, get) => ({
   // ---- LLMs ----
   replaceLLMs: (llms) => set({ llms }),
 
-  // ---- Conversation ----
-  appendUserTurn: (text) =>
-    set((state) => ({
-      turns: [...state.turns, { role: "user", content: text } as UserTurn],
-      // The agent will start running on the bridge shortly. Set this
-      // synchronously rather than waiting for `turn_start` over IPC —
-      // the round-trip would re-introduce the very latency we're
-      // masking with the thinking placeholder.
-      agentRunning: true,
-      // Drive MainView's stick-to-top scroll. See `userSubmitTick`
-      // doc comment in State.
-      userSubmitTick: state.userSubmitTick + 1,
-      // Wipe any leftover streaming buffer from a previous turn.
-      inFlightContent: "",
-    })),
+  // ---- Conversation (per-session) ----
+  appendUserTurn: (sessionId, text) =>
+    set((state) =>
+      applyRuntimeUpdate(state, sessionId, (rt) => ({
+        ...rt,
+        turns: [...rt.turns, { role: "user", content: text } as UserTurn],
+        // The agent will start running on the bridge shortly. Set
+        // synchronously rather than wait for `turn_start` over IPC —
+        // the round-trip would re-introduce the latency we're
+        // masking with the thinking placeholder.
+        agentRunning: true,
+        // Drive MainView's stick-to-top scroll. See `userSubmitTick`
+        // doc comment in State.
+        userSubmitTick: rt.userSubmitTick + 1,
+        // Wipe leftover streaming buffer from a previous turn.
+        inFlightContent: "",
+      })),
+    ),
 
-  appendAgentTurn: (turn) =>
-    set((state) => ({
-      turns: [...state.turns, turn],
-      // turn_end is the canonical "agent finished this round" signal.
-      // ipc-handlers also clears agentRunning on `error` /
-      // `run_complete` for the failure paths where turn_end never
-      // arrives.
-      agentRunning: false,
-      // Finalised turn replaces the streaming buffer.
-      inFlightContent: "",
-    })),
+  appendAgentTurn: (sessionId, turn) =>
+    set((state) =>
+      applyRuntimeUpdate(state, sessionId, (rt) => ({
+        ...rt,
+        turns: [...rt.turns, turn],
+        // turn_end is the canonical "agent finished this round"
+        // signal. ipc-handlers also clears agentRunning on `error`/
+        // `run_complete` for the failure paths where turn_end never
+        // arrives.
+        agentRunning: false,
+        // Finalised turn replaces the streaming buffer.
+        inFlightContent: "",
+      })),
+    ),
 
-  addPendingApproval: (p) =>
-    set((state) => ({
-      // de-dupe on approvalId so a re-emitted pending event doesn't
-      // create twin entries
-      pendingApprovals: [
-        ...state.pendingApprovals.filter((x) => x.approvalId !== p.approvalId),
-        p,
-      ],
-    })),
+  addPendingApproval: (sessionId, p) =>
+    set((state) =>
+      applyRuntimeUpdate(state, sessionId, (rt) => ({
+        ...rt,
+        // de-dupe on approvalId so a re-emitted pending event doesn't
+        // create twin entries
+        pendingApprovals: [
+          ...rt.pendingApprovals.filter((x) => x.approvalId !== p.approvalId),
+          p,
+        ],
+      })),
+    ),
 
-  removePendingApproval: (approvalId) =>
-    set((state) => ({
-      pendingApprovals: state.pendingApprovals.filter(
-        (x) => x.approvalId !== approvalId,
-      ),
-    })),
+  removePendingApproval: (sessionId, approvalId) =>
+    set((state) =>
+      applyRuntimeUpdate(state, sessionId, (rt) => ({
+        ...rt,
+        pendingApprovals: rt.pendingApprovals.filter(
+          (x) => x.approvalId !== approvalId,
+        ),
+      })),
+    ),
 
-  clearConversation: () =>
-    set({
-      turns: [],
-      pendingApprovals: [],
-      approvalDecisions: {},
-      agentRunning: false,
-      currentTurnIndex: null,
-      inFlightContent: "",
-    }),
+  recordApprovalDecision: (sessionId, approvalId, decision) => {
+    set((state) =>
+      applyRuntimeUpdate(state, sessionId, (rt) => ({
+        ...rt,
+        approvalDecisions: {
+          ...rt.approvalDecisions,
+          [approvalId]: decision,
+        },
+      })),
+    );
+    // Best-effort SQLite double-write for the approval audit trail.
+    // The matching `pending` row was written when tool_call_pending
+    // arrived (see ipc-handlers.persistToolEventPendingFromIPC); this
+    // update fills in approval_decision + terminal status.
+    void persistToolEventApprovalDecision(
+      approvalId,
+      decision,
+      new Date().toISOString(),
+    ).catch((e) => {
+      console.debug("[store] persistToolEventApprovalDecision failed.", e);
+    });
+  },
 
-  setAgentRunning: (running) => set({ agentRunning: running }),
-  setCurrentTurnIndex: (idx) => set({ currentTurnIndex: idx }),
+  clearConversation: (sessionId) =>
+    set((state) =>
+      applyRuntimeUpdate(state, sessionId, (rt) => ({
+        ...rt,
+        turns: [],
+        pendingApprovals: [],
+        approvalDecisions: {},
+        agentRunning: false,
+        currentTurnIndex: null,
+        inFlightContent: "",
+      })),
+    ),
 
-  appendInFlightDelta: (delta) =>
-    set((state) => ({ inFlightContent: state.inFlightContent + delta })),
+  setAgentRunning: (sessionId, running) =>
+    set((state) =>
+      applyRuntimeUpdate(state, sessionId, (rt) => ({
+        ...rt,
+        agentRunning: running,
+      })),
+    ),
 
-  clearInFlightContent: () => set({ inFlightContent: "" }),
+  setCurrentTurnIndex: (sessionId, idx) =>
+    set((state) =>
+      applyRuntimeUpdate(state, sessionId, (rt) => ({
+        ...rt,
+        currentTurnIndex: idx,
+      })),
+    ),
+
+  appendInFlightDelta: (sessionId, delta) =>
+    set((state) =>
+      applyRuntimeUpdate(state, sessionId, (rt) => ({
+        ...rt,
+        inFlightContent: rt.inFlightContent + delta,
+      })),
+    ),
+
+  clearInFlightContent: (sessionId) =>
+    set((state) =>
+      applyRuntimeUpdate(state, sessionId, (rt) => ({
+        ...rt,
+        inFlightContent: "",
+      })),
+    ),
 
   // ---- Bridge runtime ----
-  setBridgeStatus: (status) => set({ bridgeStatus: status }),
+  setBridgeStatus: (sessionId, status) =>
+    set((state) =>
+      applyRuntimeUpdate(state, sessionId, (rt) => ({
+        ...rt,
+        bridgeStatus: status,
+      })),
+    ),
 
   spawnBridge: async (args) => {
-    if (_bridgeClient) {
+    const sessionId = args.sessionId;
+    // One process per sessionId. If that session already has a live
+    // bridge, shut it down first. Other sessions' bridges are NOT
+    // touched — multi-session is the v0.1 core promise.
+    if (_bridgeClients.has(sessionId)) {
       console.warn(
-        "[store] spawnBridge called while another bridge is alive; shutting down first.",
+        `[store] spawnBridge(${sessionId}) called while a bridge for that session is alive; shutting down first.`,
       );
-      await useAppStore.getState().shutdownBridge();
+      await useAppStore.getState().shutdownBridge(sessionId);
     }
 
-    set({ bridgeStatus: "spawning", bridgeError: null });
+    set((state) =>
+      applyRuntimeUpdate(state, sessionId, (rt) => ({
+        ...rt,
+        bridgeStatus: "spawning",
+        bridgeError: null,
+      })),
+    );
+
     try {
-      _bridgeClient = await spawnBridgeProcess(args, {
+      const client = await spawnBridgeProcess(args, {
         onEvent: (event) => dispatchIPCEvent(event, useAppStore),
-        onStderr: (line) => console.warn("[bridge stderr]", line),
+        onStderr: (line) =>
+          console.warn(`[bridge ${sessionId} stderr]`, line),
         onClose: (code, signal) => {
-          console.info("[bridge] closed", { code, signal });
-          _bridgeClient = null;
-          set({ bridgeStatus: "closed", bridgePid: null });
+          console.info(`[bridge ${sessionId}] closed`, { code, signal });
+          _bridgeClients.delete(sessionId);
+          useAppStore.setState((state) =>
+            applyRuntimeUpdate(state, sessionId, (rt) => ({
+              ...rt,
+              bridgeStatus: "closed",
+              bridgePid: null,
+            })),
+          );
         },
         onError: (msg) => {
-          console.error("[bridge] error", msg);
-          set({ bridgeStatus: "error", bridgeError: msg });
+          console.error(`[bridge ${sessionId}] error`, msg);
+          useAppStore.setState((state) =>
+            applyRuntimeUpdate(state, sessionId, (rt) => ({
+              ...rt,
+              bridgeStatus: "error",
+              bridgeError: msg,
+            })),
+          );
         },
         onMalformedLine: (line) =>
-          console.warn("[bridge] malformed stdout line:", line),
+          console.warn(
+            `[bridge ${sessionId}] malformed stdout line:`,
+            line,
+          ),
       });
+      _bridgeClients.set(sessionId, client);
       // Status flips to "connected" only after the bridge sends its
-      // ready event (handled in ipc-handlers). Keep "spawning" here
-      // so the UI knows to show a loading affordance.
-      set({ bridgePid: _bridgeClient.pid });
+      // `ready` event (handled in ipc-handlers). Keep "spawning"
+      // here so the UI knows to show a loading affordance.
+      set((state) =>
+        applyRuntimeUpdate(state, sessionId, (rt) => ({
+          ...rt,
+          bridgePid: client.pid,
+        })),
+      );
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
-      _bridgeClient = null;
-      set({ bridgeStatus: "error", bridgeError: msg, bridgePid: null });
+      _bridgeClients.delete(sessionId);
+      set((state) =>
+        applyRuntimeUpdate(state, sessionId, (rt) => ({
+          ...rt,
+          bridgeStatus: "error",
+          bridgeError: msg,
+          bridgePid: null,
+        })),
+      );
     }
   },
 
-  shutdownBridge: async () => {
-    const client = _bridgeClient;
+  shutdownBridge: async (sessionId) => {
+    const client = _bridgeClients.get(sessionId);
     if (!client) return;
     try {
       await client.shutdown();
     } finally {
-      _bridgeClient = null;
-      set({ bridgeStatus: "closed", bridgePid: null });
+      _bridgeClients.delete(sessionId);
+      set((state) =>
+        applyRuntimeUpdate(state, sessionId, (rt) => ({
+          ...rt,
+          bridgeStatus: "closed",
+          bridgePid: null,
+        })),
+      );
     }
   },
 
-  sendIPCCommand: async (cmd) => {
-    const client = _bridgeClient;
+  shutdownAllBridges: async () => {
+    const ids = Array.from(_bridgeClients.keys());
+    await Promise.all(
+      ids.map((id) => useAppStore.getState().shutdownBridge(id)),
+    );
+  },
+
+  sendIPCCommand: async (sessionId, cmd) => {
+    const client = _bridgeClients.get(sessionId);
     if (!client) {
       console.warn(
-        "[store] sendIPCCommand called but no bridge is alive:",
+        `[store] sendIPCCommand(${sessionId}) called but no bridge is alive:`,
         cmd,
       );
       return;
@@ -474,9 +681,9 @@ export const useAppStore = create<AppStore>((set, get) => ({
   //
   // Called once at app mount. Loads sessions from SQLite; if the DB
   // is empty, seeds the demo fixtures into it so the dev build has
-  // something to render. Falls back silently to the demo seed already
-  // in initial state if SQLite isn't available (e.g. Vite-only dev
-  // server, or first launch before tauri-plugin-sql finishes init).
+  // something to render. Falls back silently to the demo seed in
+  // initial state if SQLite isn't available (Vite-only dev / first
+  // launch before tauri-plugin-sql finishes init).
   hydrateFromDB: async () => {
     try {
       const sessions = await loadSessions();
@@ -488,14 +695,13 @@ export const useAppStore = create<AppStore>((set, get) => ({
       }
     } catch (e) {
       // Non-Tauri context (Vite dev) or migration not yet applied.
-      // Initial state's DEMO_SESSIONS continues to render.
       console.warn(
         "[store] hydrateFromDB: SQLite unavailable, using demo seed.",
         e,
       );
     }
     // YOLO mode (PRD §11.5) — sticky preference. Best-effort load;
-    // defaults to `false` from the initial state when SQLite is
+    // defaults to `false` from initial state when SQLite is
     // unavailable. We don't call setYoloMode() here so as not to
     // double-persist on startup or attempt to notify a bridge that
     // doesn't exist yet — the on-`ready` IPC handler does that sync

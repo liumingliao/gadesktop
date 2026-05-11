@@ -57,14 +57,17 @@ export function dispatchIPCEvent(
           isCurrent: l.isCurrent,
         })),
       );
-      s.setBridgeStatus("connected");
+      s.setBridgeStatus(event.sessionId, "connected");
       // Sync session-scoped state to the freshly-spawned bridge.
       // YOLO mode (PRD §11.5): the bridge boots with yolo_mode=false;
       // if the user has it persisted as on, push the override now —
       // it's queued in the bridge's command pipeline and processed
       // before any subsequent user message can trigger a tool call.
       if (s.yoloMode) {
-        void s.sendIPCCommand({ kind: "set_yolo_mode", enabled: true });
+        void s.sendIPCCommand(event.sessionId, {
+          kind: "set_yolo_mode",
+          enabled: true,
+        });
       }
       return;
     }
@@ -90,9 +93,9 @@ export function dispatchIPCEvent(
       // running flag so the thinking placeholder + Stop-mode Composer
       // don't get stuck on. Categories like `quota_exceeded` /
       // `network` show the error toast instead.
-      s.setAgentRunning(false);
-      s.setCurrentTurnIndex(null);
-      s.clearInFlightContent();
+      s.setAgentRunning(event.sessionId, false);
+      s.setCurrentTurnIndex(event.sessionId, null);
+      s.clearInFlightContent(event.sessionId);
       return;
     }
 
@@ -103,12 +106,12 @@ export function dispatchIPCEvent(
         hasFinalAnswer: !!event.responseContent,
       });
       const turn = turnFromTurnEnd(event);
-      s.appendAgentTurn(turn);
+      s.appendAgentTurn(event.sessionId, turn);
       // Defensive: appendAgentTurn already sets agentRunning=false in
       // its reducer, but call it again here so the IPC layer is
       // self-contained — anyone tracing event flow without reading
       // the store action sees the state transition explicitly.
-      s.setAgentRunning(false);
+      s.setAgentRunning(event.sessionId, false);
       // Best-effort SQLite double-write. Silently swallow when the
       // backend isn't available (Vite dev / first launch / migration).
       void persistTurnEndToMessages(event);
@@ -124,7 +127,7 @@ export function dispatchIPCEvent(
         riskLevel: event.riskLevel,
         args: event.args,
       };
-      s.addPendingApproval(pending);
+      s.addPendingApproval(event.sessionId, pending);
       // Best-effort SQLite double-write for audit trail. Silently
       // swallow when SQLite isn't available (Vite dev / first launch).
       void persistToolEventPendingFromIPC(event);
@@ -143,9 +146,9 @@ export function dispatchIPCEvent(
       // Last-resort clear: turn_end already cleared agentRunning for
       // the normal happy path; this catches ABORTED / DENIED exits
       // where turn_end_callback didn't fire on the GA side.
-      s.setAgentRunning(false);
-      s.setCurrentTurnIndex(null);
-      s.clearInFlightContent();
+      s.setAgentRunning(event.sessionId, false);
+      s.setCurrentTurnIndex(event.sessionId, null);
+      s.clearInFlightContent(event.sessionId);
       return;
     }
 
@@ -155,10 +158,10 @@ export function dispatchIPCEvent(
       // "Turn N · 思考中…" so users can see progress on long
       // multi-turn tasks. Cleared on run_complete / error.
       console.debug("[ipc] turn_start", event);
-      s.setCurrentTurnIndex(event.turnIndex);
+      s.setCurrentTurnIndex(event.sessionId, event.turnIndex);
       // New turn starts → drop whatever streaming buffer the previous
       // turn left, so the in-flight render doesn't bleed across turns.
-      s.clearInFlightContent();
+      s.clearInFlightContent(event.sessionId);
       return;
     }
 
@@ -166,7 +169,7 @@ export function dispatchIPCEvent(
       // Streaming partial. Append delta; MainView re-renders the
       // in-flight reply with cleanPartialContent stripping GA's
       // internal tags.
-      s.appendInFlightDelta(event.delta);
+      s.appendInFlightDelta(event.sessionId, event.delta);
       return;
     }
 

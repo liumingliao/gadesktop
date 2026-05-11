@@ -71,7 +71,7 @@ function App() {
 
   const bridgeStatus = useAppStore((s) => s.bridgeStatus);
   const spawnBridge = useAppStore((s) => s.spawnBridge);
-  const shutdownBridge = useAppStore((s) => s.shutdownBridge);
+  const shutdownAllBridges = useAppStore((s) => s.shutdownAllBridges);
   const sendIPCCommand = useAppStore((s) => s.sendIPCCommand);
 
   const storeTurns = useAppStore((s) => s.turns);
@@ -175,7 +175,9 @@ function App() {
             bridgeStatus={bridgeStatus}
             onSpawnBridge={() => spawnBridge(DEMO_BRIDGE_ARGS)}
             onShutdownBridge={() => {
-              void shutdownBridge();
+              // Dev-only kill switch. Multi-session is N-active, so
+              // "kill" maps to "shutdown every alive bridge".
+              void shutdownAllBridges();
             }}
           />
         )}
@@ -216,9 +218,18 @@ function App() {
                 // — otherwise we'd flip the source-of-truth precedence
                 // away from the demo flow and the user would see their
                 // own message but no agent reply.
+                //
+                // sessionId is hard-coded to "s-today-1" here because
+                // we're activating the same session in setActiveSession
+                // below (Zustand state updates are async, so we can't
+                // rely on activeSessionId being updated by this line).
                 if (bridgeStatus === "connected") {
-                  appendUserTurn(t);
-                  sendIPCCommand({ kind: "user_message", text: t, images: [] });
+                  appendUserTurn("s-today-1", t);
+                  sendIPCCommand("s-today-1", {
+                    kind: "user_message",
+                    text: t,
+                    images: [],
+                  });
                 } else {
                   console.info("[empty] submit (demo flow):", t);
                 }
@@ -227,8 +238,12 @@ function App() {
               }}
               onQuickPrompt={(p) => {
                 if (bridgeStatus === "connected") {
-                  appendUserTurn(p);
-                  sendIPCCommand({ kind: "user_message", text: p, images: [] });
+                  appendUserTurn("s-today-1", p);
+                  sendIPCCommand("s-today-1", {
+                    kind: "user_message",
+                    text: p,
+                    images: [],
+                  });
                 } else {
                   console.info("[empty] quick-prompt (demo flow):", p);
                 }
@@ -243,18 +258,27 @@ function App() {
               pendingApprovals={pendingApprovals}
               approvalDecisions={approvalDecisions}
               onSubmit={(t) => {
+                // effectiveActiveId always resolves to a sessionId on
+                // the main screen (see fallback at L161). Components
+                // below MainView never see the empty-string projection.
+                const targetId = effectiveActiveId ?? "s-today-1";
                 if (bridgeStatus === "connected") {
-                  appendUserTurn(t);
-                  sendIPCCommand({ kind: "user_message", text: t, images: [] });
+                  appendUserTurn(targetId, t);
+                  sendIPCCommand(targetId, {
+                    kind: "user_message",
+                    text: t,
+                    images: [],
+                  });
                 } else {
                   console.info("[main] submit (demo flow):", t);
                 }
               }}
               onApprove={(approvalId, decision) => {
-                recordApprovalDecision(approvalId, decision);
-                removePendingApproval(approvalId);
+                const targetId = effectiveActiveId ?? "s-today-1";
+                recordApprovalDecision(targetId, approvalId, decision);
+                removePendingApproval(targetId, approvalId);
                 if (bridgeStatus === "connected") {
-                  sendIPCCommand({
+                  sendIPCCommand(targetId, {
                     kind: "approval_response",
                     approvalId,
                     decision,
@@ -266,8 +290,9 @@ function App() {
               }
               onStop={() => {
                 console.info("[main] stop");
+                const targetId = effectiveActiveId ?? "s-today-1";
                 if (bridgeStatus === "connected") {
-                  sendIPCCommand({ kind: "abort" });
+                  sendIPCCommand(targetId, { kind: "abort" });
                 }
               }}
               isRunning={isRunning}
@@ -374,11 +399,16 @@ export default App;
 // the prefs table once #10b wires Onboarding step 1's path picker
 // + Settings → Runtime back to SQLite. If your machine has GA at a
 // different path, change DEMO_BRIDGE_ARGS.gaPath / bridgeCwd here.
+// sessionId aligns with DEMO_SESSIONS[0].id ("s-today-1" — see
+// stores/demo.ts) so the dev "spawn" button creates a bridge for
+// the same session the demo flow activates on empty→main. In the
+// N-active multi-session model, sendIPCCommand routes by sessionId,
+// so a mismatched id here would send messages into the void.
 const DEMO_BRIDGE_ARGS = {
   python: "python3",
   gaPath: "/Users/inkstone/Documents/GenericAgent",
   bridgeCwd: "/Users/inkstone/Documents/genericagent-webui",
-  sessionId: "sess_demo_v0_1_a",
+  sessionId: "s-today-1",
 };
 
 const SCREEN_TOGGLE_LABEL: Record<Screen, string> = {
