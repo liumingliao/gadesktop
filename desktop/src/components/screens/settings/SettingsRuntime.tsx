@@ -41,8 +41,14 @@ export function SettingsRuntime({
       <PathField
         label="Bridge Python"
         value={info.pythonVersion}
+        // Picker intentionally not wired — Tauri's shell:allow-spawn
+        // capability only permits the `python3` / `python` aliases
+        // (resolved via PATH). A self-picked absolute path would be
+        // rejected at spawn time. To use a non-PATH interpreter,
+        // edit src-tauri/capabilities/default.json.
         onPick={onChangeBridgePython}
-        hint="用于运行 bridge，影响 GA 子进程"
+        readOnly
+        hint="使用 PATH 中的 python3 · 自定义路径需编辑 capabilities/default.json"
       />
 
       <div>
@@ -106,11 +112,15 @@ function PathField({
   value,
   hint,
   onPick,
+  readOnly = false,
 }: {
   label: string;
   value: string;
   hint?: string;
   onPick?: () => void;
+  /** When true, the field shows the value but suppresses the picker —
+   * used for Bridge Python (see capabilities constraint comment above). */
+  readOnly?: boolean;
 }) {
   return (
     <div>
@@ -122,14 +132,16 @@ function PathField({
           readOnly
           className="min-w-0 flex-1 rounded-sm border border-line bg-surface px-3 py-2 font-mono text-[12.5px] text-ink outline-none"
         />
-        <button
-          type="button"
-          onClick={onPick}
-          className="inline-flex shrink-0 items-center gap-1.5 rounded-sm border border-line bg-elevated px-3 py-2 text-[12.5px] text-ink-soft transition-colors hover:border-brand hover:bg-brand-soft hover:text-ink"
-        >
-          <FolderOpen size={13} weight="thin" />
-          选择
-        </button>
+        {!readOnly && (
+          <button
+            type="button"
+            onClick={onPick}
+            className="inline-flex shrink-0 items-center gap-1.5 rounded-sm border border-line bg-elevated px-3 py-2 text-[12.5px] text-ink-soft transition-colors hover:border-brand hover:bg-brand-soft hover:text-ink"
+          >
+            <FolderOpen size={13} weight="thin" />
+            选择
+          </button>
+        )}
       </div>
       {hint && <div className="mt-1.5 text-[12px] text-ink-muted">{hint}</div>}
     </div>

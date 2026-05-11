@@ -325,6 +325,21 @@ interface State {
   runtimeInfo: RuntimeInfo;
 
   // ---- Approval (global) ----
+  /**
+   * GA subprocess spawn config. `python` + `gaPath` are user-editable
+   * via Settings → Runtime path pickers (Stage 3 Task 4); `bridgeCwd`
+   * is internal (workbench repo root in dev / app bundle resources
+   * dir in production — set by the macOS bundle Task).
+   *
+   * Falls back to DEMO_GA_CONFIG on first launch before the user has
+   * opened Settings. Persists to prefs key `ga_config` (JSON).
+   */
+  gaConfig: {
+    python: string;
+    gaPath: string;
+    bridgeCwd: string;
+  };
+
   approvalConfig: ApprovalConfig;
   approvalRecords: ApprovalRecord[];
   /**
@@ -449,6 +464,18 @@ interface Actions {
    * does not gate it.
    */
   setYoloMode: (enabled: boolean) => Promise<void>;
+  /**
+   * Update the GA spawn config and persist to prefs. `partial` lets
+   * callers pick one field at a time (Settings has separate pickers
+   * for python vs gaPath). Also writes through to runtimeInfo so the
+   * Inspector / Settings → Runtime tab reflect the new path
+   * immediately. Existing alive bridges keep their old config — DESIGN
+   * §9 commits to "restart Workbench to apply" rather than killing
+   * in-flight sessions silently; we push a toast to remind the user.
+   */
+  setGAConfig: (
+    partial: Partial<{ python: string; gaPath: string; bridgeCwd: string }>,
+  ) => Promise<void>;
 
   // Errors
   pushToast: (e: AppError) => void;
@@ -627,6 +654,8 @@ export const useAppStore = create<AppStore>((set, get) => ({
   // plausible LLM pre-bridge.
   runtimeInfo: DEMO_RUNTIME_INFO,
 
+  gaConfig: DEMO_GA_CONFIG,
+
   approvalConfig: DEMO_APPROVAL_CONFIG,
   approvalRecords: DEMO_APPROVAL_RECORDS,
   yoloMode: false,
@@ -793,7 +822,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
       rtAfter.bridgeStatus === "error";
     if (needsSpawn) {
       await get().spawnBridge({
-        ...DEMO_GA_CONFIG,
+        ...get().gaConfig,
         sessionId: id,
       });
     } else {
@@ -866,6 +895,48 @@ export const useAppStore = create<AppStore>((set, get) => ({
       } catch (e) {
         console.warn(`[store] setYoloMode: bridge ${sid} notify failed.`, e);
       }
+    }
+  },
+
+  setGAConfig: async (partial) => {
+    const merged = { ...get().gaConfig, ...partial };
+    set((state) => ({
+      gaConfig: merged,
+      // Reflect into runtimeInfo so the Settings → Runtime tab and
+      // Inspector → Runtime card show the new path immediately.
+      // pythonVersion is intentionally repurposed to display the
+      // interpreter path — users see the path they picked.
+      runtimeInfo: {
+        ...state.runtimeInfo,
+        gaPath: merged.gaPath,
+        pythonVersion: merged.python,
+      },
+    }));
+    try {
+      await setPref("ga_config", merged);
+    } catch (e) {
+      console.warn("[store] setGAConfig: pref persistence failed.", e);
+    }
+    // Existing alive bridges keep their old config. Tell the user
+    // that the change takes effect on next launch — DESIGN §9 §"改动
+    // 后需要重启 Workbench". Skip the toast if nothing changed (no-op
+    // call), since the picker might fire even when the user re-picks
+    // the same path.
+    const changedField = Object.entries(partial).find(
+      ([, v]) => v !== undefined && v !== "",
+    );
+    if (changedField) {
+      get().pushToast(
+        makeAppError({
+          category: "business",
+          severity: "info",
+          message: "已保存路径配置 · 重启 Workbench 才能让现有 session 生效",
+          hint: null,
+          retryable: false,
+          context: "setGAConfig",
+          traceback: null,
+        }),
+      );
     }
   },
 
@@ -1237,6 +1308,28 @@ export const useAppStore = create<AppStore>((set, get) => ({
       if (yolo === true) set({ yoloMode: true });
     } catch (e) {
       console.warn("[store] hydrateFromDB: yolo pref load failed.", e);
+    }
+    // GA spawn config (Stage 3 Task 4). Fall back to DEMO_GA_CONFIG in
+    // initial state when missing — first launch sees the demo path
+    // until the user opens Settings → Runtime and picks one.
+    try {
+      const saved = await getPref<{
+        python: string;
+        gaPath: string;
+        bridgeCwd: string;
+      }>("ga_config");
+      if (saved && saved.gaPath) {
+        set((state) => ({
+          gaConfig: saved,
+          runtimeInfo: {
+            ...state.runtimeInfo,
+            gaPath: saved.gaPath,
+            pythonVersion: saved.python,
+          },
+        }));
+      }
+    } catch (e) {
+      console.warn("[store] hydrateFromDB: ga_config pref load failed.", e);
     }
   },
 }));

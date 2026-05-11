@@ -80,6 +80,7 @@ function App() {
   const bridgeStatus = useAppStore((s) => s.bridgeStatus);
   const shutdownAllBridges = useAppStore((s) => s.shutdownAllBridges);
   const sendIPCCommand = useAppStore((s) => s.sendIPCCommand);
+  const setGAConfig = useAppStore((s) => s.setGAConfig);
 
   const storeTurns = useAppStore((s) => s.turns);
   const storePending = useAppStore((s) => s.pendingApprovals);
@@ -429,12 +430,12 @@ function App() {
         }}
         onChangeRequiredTools={setApprovalRequiredTools}
         onRemoveAlwaysAllow={removeAlwaysAllow}
-        onChangeGAPath={() =>
-          console.info("[settings] pick GA path — wired in #10")
-        }
-        onChangeBridgePython={() =>
-          console.info("[settings] pick Bridge Python — wired in #10")
-        }
+        onChangeGAPath={() => {
+          void pickGAPath(setGAConfig);
+        }}
+        // Bridge Python picker intentionally not wired — Tauri's
+        // shell:allow-spawn only permits `python3` / `python` aliases.
+        // SettingsRuntime renders that field read-only for V0.1.
         onReRunHealthCheck={() =>
           console.info("[settings] re-run health check")
         }
@@ -461,6 +462,32 @@ function App() {
 }
 
 export default App;
+
+// ---------------- Settings path pickers ----------------
+//
+// Lazy-import the Tauri dialog plugin so a Vite-only dev build doesn't
+// fail to load App.tsx. In Tauri the dialog returns a string (single
+// selection), null on cancel, or string[] when multiple=true.
+
+async function pickGAPath(
+  setGAConfig: (
+    p: Partial<{ python: string; gaPath: string; bridgeCwd: string }>,
+  ) => Promise<void>,
+): Promise<void> {
+  try {
+    const { open } = await import("@tauri-apps/plugin-dialog");
+    const selected = await open({
+      directory: true,
+      multiple: false,
+      title: "选择 GenericAgent 仓库目录",
+    });
+    if (typeof selected === "string" && selected.length > 0) {
+      await setGAConfig({ gaPath: selected });
+    }
+  } catch (e) {
+    console.warn("[settings] pickGAPath failed.", e);
+  }
+}
 
 // ---------------- dev-only screen toggle ----------------
 
