@@ -7,7 +7,6 @@ import {
   PauseCircle,
   Plus,
   SidebarSimple,
-  Trash,
   WarningCircle,
 } from "@phosphor-icons/react";
 
@@ -31,9 +30,14 @@ export interface SidebarProps {
   onNewChat?: () => void;
   onSearch?: () => void;
   /** Right-click → Archive. Hides the session from the bucketed list
-   * but keeps the row in SQLite. V0.1 has no Archived View yet — a
-   * future Settings → Archive page can surface them. */
+   * but keeps the row in SQLite. */
   onArchiveSession?: (id: string) => void;
+  /** Click the Archived footer button → open the Archived dialog
+   * (list of archived sessions, with Restore / Delete / Empty all). */
+  onOpenArchived?: () => void;
+  /** Count of archived sessions — shown as a small numeral after the
+   * footer label. Omit / 0 → just the label. */
+  archivedCount?: number;
   /**
    * Collapse the sidebar. Lives on the Sidebar itself (in the header
    * row, right of the logo) rather than in the TopBar — co-locating the
@@ -67,6 +71,8 @@ export function Sidebar({
   onNewChat,
   onSearch,
   onArchiveSession,
+  onOpenArchived,
+  archivedCount = 0,
   onToggle,
 }: SidebarProps) {
   const isEmpty = sessions.length === 0;
@@ -100,7 +106,10 @@ export function Sidebar({
             {projects.length > 0 && <SidebarProjects projects={projects} />}
           </div>
 
-          <SidebarFooter />
+          <SidebarFooter
+            count={archivedCount}
+            onOpenArchived={onOpenArchived}
+          />
         </>
       )}
     </div>
@@ -401,11 +410,27 @@ function SidebarProjects({ projects }: { projects: Project[] }) {
   );
 }
 
-function SidebarFooter() {
+function SidebarFooter({
+  count,
+  onOpenArchived,
+}: {
+  count: number;
+  onOpenArchived?: () => void;
+}) {
+  // "Archived" not "Trash": our archive flow keeps data forever
+  // (status="archived", row preserved). Trash semantics would imply
+  // a holding area that's eventually purged — not what we do. The
+  // ArchivedDialog provides single-row Delete and an Empty-all
+  // operation if the user wants to actually purge.
   return (
-    <div className="flex items-center gap-2 border-t border-line px-3.5 py-2 text-[11.5px] text-ink-muted">
-      <Trash size={12} weight="thin" />
-      <span>Trash</span>
-    </div>
+    <button
+      type="button"
+      onClick={onOpenArchived}
+      className="flex w-full items-center gap-2 border-t border-line px-3.5 py-2 text-left text-[11.5px] text-ink-muted transition-colors hover:bg-hover hover:text-ink"
+    >
+      <Archive size={12} weight="thin" />
+      <span>Archived</span>
+      {count > 0 && <span className="ml-auto text-ink-soft">{count}</span>}
+    </button>
   );
 }

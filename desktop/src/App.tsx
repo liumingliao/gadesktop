@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { ToastHost } from "@/components/error-card/ToastHost";
 import { Inspector } from "@/components/inspector/Inspector";
@@ -10,6 +10,7 @@ import { EmptyState } from "@/components/screens/EmptyState";
 import { MainView } from "@/components/screens/MainView";
 import { Onboarding } from "@/components/screens/onboarding/Onboarding";
 import { Settings } from "@/components/screens/settings/Settings";
+import { ArchivedDialog } from "@/components/screens/archived/ArchivedDialog";
 import { cn } from "@/lib/utils";
 import {
   buildDemoPending,
@@ -60,6 +61,11 @@ function App() {
   const activateSession = useAppStore((s) => s.activateSession);
   const setActiveSession = useAppStore((s) => s.setActiveSession);
   const archiveSession = useAppStore((s) => s.archiveSession);
+  const unarchiveSession = useAppStore((s) => s.unarchiveSession);
+  const deleteSessionPermanently = useAppStore(
+    (s) => s.deleteSessionPermanently,
+  );
+  const emptyArchive = useAppStore((s) => s.emptyArchive);
   const llms = useAppStore((s) => s.llms);
   const llmDisplayName = useAppStore((s) => s.llmDisplayName);
   const runtimeInfo = useAppStore((s) => s.runtimeInfo);
@@ -180,13 +186,20 @@ function App() {
   //
   // Archived sessions are filtered out here so both Sidebar and
   // CommandPalette pull from the same pre-filtered list. The rows
-  // still live in SQLite for a future Settings → Archive view.
+  // still live in SQLite — the Archived dialog (sidebar footer)
+  // surfaces them for Restore / Delete / Empty all.
   const visibleSessions = useMemo(
     () => sessions.filter((s) => s.status !== "archived"),
     [sessions],
   );
+  const archivedCount = sessions.length - visibleSessions.length;
   const effectiveActiveId = screen === "main" ? activeSessionId : undefined;
   const activeSession = visibleSessions.find((s) => s.id === effectiveActiveId);
+
+  // Archived dialog open state — local UI state, no need to live in
+  // the global store. Persisting across reloads would be confusing
+  // (user expects modals to be closed on app re-open).
+  const [archivedOpen, setArchivedOpen] = useState(false);
 
   // Onboarding takeover: no AppShell, no overlays besides the dev
   // toggle.
@@ -265,6 +278,8 @@ function App() {
               setScreen("main");
             }}
             onArchiveSession={(id) => archiveSession(id)}
+            onOpenArchived={() => setArchivedOpen(true)}
+            archivedCount={archivedCount}
           />
         }
         main={
@@ -452,6 +467,15 @@ function App() {
         onReRunHealthCheck={() =>
           console.info("[settings] re-run health check")
         }
+      />
+
+      <ArchivedDialog
+        open={archivedOpen}
+        onOpenChange={setArchivedOpen}
+        sessions={sessions}
+        onRestore={(id) => unarchiveSession(id)}
+        onDeletePermanently={(id) => deleteSessionPermanently(id)}
+        onEmptyAll={() => emptyArchive()}
       />
 
       <ToastHost

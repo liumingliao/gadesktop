@@ -9,6 +9,7 @@ import {
 import {
   deleteDemoSessions,
   deleteEmptyNewSessions,
+  deleteSession as deleteSessionFromDB,
   getPref,
   loadMessagesBySession,
   loadSessions,
@@ -477,6 +478,25 @@ interface Actions {
   /** Reverse archiveSession: status back to "idle" + persist. */
   unarchiveSession: (sessionId: string) => void;
   /**
+   * Permanently delete an archived session. Cascades to its
+   * `messages` and `tool_events` rows via the SQLite FK ON DELETE
+   * CASCADE clause (001_init.sql). Destructive — UI must confirm
+   * before invoking.
+   *
+   * If the deleted session is somehow still active (shouldn't be —
+   * archive flow already cleared activeSessionId), the projection
+   * resets to the empty runtime. Also shuts down any leftover
+   * alive bridge for the session id (very rare; defensive).
+   */
+  deleteSessionPermanently: (sessionId: string) => Promise<void>;
+  /**
+   * Permanently delete every archived session. Destructive — UI
+   * must double-confirm (checkbox + destructive button) before
+   * invoking. Returns the count of rows deleted so the caller can
+   * show a feedback toast.
+   */
+  emptyArchive: () => Promise<number>;
+  /**
    * Restore a session's `turns` from SQLite — Stage 3 Task 3 Session
    * Restore. Called by `activateSession` when the runtime is fresh
    * (no in-memory turns yet) and the session has prior turn history
@@ -794,32 +814,15 @@ export const useAppStore = create<AppStore>((set, get) => ({
     void persistSession(newSession).catch((e) => {
       console.debug("[store] createSession persistSession failed.", e);
     });
-    // Soft limit warning. The store doesn't block — power users can
-    // dismiss the toast and keep going. Counts only NON-archived
-    // rows: archived sessions are already "cleaned up" from the
-    // sidebar (App.tsx filters them out of visibleSessions), so the
-    // user shouldn't be nagged about needing to archive sessions
-    // they've already archived. Previously this counted
-    // `sessions.length` and produced "48 sessions" alarms when the
-    // user had archived 40 of them — a real-world bug surfaced in
-    // dev verify round 8.
-    const liveNow = get().sessions.filter(
-      (s) => s.status !== "archived",
-    ).length;
-    if (liveNow > 10) {
-      get().pushToast(
-        makeAppError({
-          category: "business",
-          severity: "warning",
-          title: "Session 数量较多",
-          message: `已开 ${liveNow} 个 session — 建议先 archive 几个旧的，否则后台 bridge 进程会越来越占资源。`,
-          hint: null,
-          retryable: false,
-          context: "createSession",
-          traceback: null,
-        }),
-      );
-    }
+    // No "too many sessions" warning: LRU 5 (see _enforceLRUCap
+    // above) already caps alive bridge processes regardless of how
+    // many session rows exist; archived rows don't hold any bridge
+    // at all. Disk footprint per row is ~KB. The previous nag
+    // ("后台 bridge 进程会越来越占资源") was based on a wrong
+    // assumption and got triggered even for users who'd just done
+    // the recommended thing (archive). Sidebar searchability for
+    // very long lists is what ⌘K / bucket grouping addresses, not
+    // a forced cleanup prompt.
     return id;
   },
 
@@ -973,6 +976,70 @@ export const useAppStore = create<AppStore>((set, get) => ({
         console.debug("[store] unarchiveSession persistSession failed.", e);
       });
     }
+  },
+
+  deleteSessionPermanently: async (sessionId) => {
+    // Defensive: kill any lingering bridge before yanking the row.
+    // Archived sessions shouldn't have a live bridge (archiveSession
+    // doesn't kill one, but LRU 5 typically reaps them); covering
+    // the edge so we don't leak a process pointing at a deleted id.
+    if (getBridgeClient(sessionId)) {
+      try {
+        await useAppStore.getState().shutdownBridge(sessionId);
+      } catch (e) {
+        console.warn(
+          "[store] deleteSessionPermanently shutdownBridge failed.",
+          e,
+        );
+      }
+    }
+    // Remove from in-memory state first so the UI updates even if
+    // SQLite is unavailable (Vite-only dev). _runtimes entry is
+    // also dropped so memory doesn't slowly leak per delete.
+    set((state) => {
+      const sessions = state.sessions.filter((s) => s.id !== sessionId);
+      const _runtimes = { ...state._runtimes };
+      delete _runtimes[sessionId];
+      const out: Partial<typeof state> = { sessions, _runtimes };
+      if (state.activeSessionId === sessionId) {
+        out.activeSessionId = undefined;
+        Object.assign(out, projectionFrom(emptyRuntime()));
+      }
+      return out;
+    });
+    // Drop SQLite row (FK ON DELETE CASCADE handles messages +
+    // tool_events). Best-effort: if SQLite is unavailable the
+    // in-memory state is already updated; the row will be a ghost
+    // until next app run + load. That's an accepted trade-off given
+    // we don't want to block the UI on disk.
+    try {
+      await deleteSessionFromDB(sessionId);
+    } catch (e) {
+      console.warn(
+        "[store] deleteSessionPermanently SQLite delete failed.",
+        e,
+      );
+    }
+  },
+
+  emptyArchive: async () => {
+    const archived = get().sessions.filter((s) => s.status === "archived");
+    if (archived.length === 0) return 0;
+    // Sequential rather than Promise.all — each one talks to SQLite
+    // and the operations are cheap; serial keeps the in-memory state
+    // and DB ordering predictable, and any failure can be logged
+    // against the specific session that broke.
+    for (const s of archived) {
+      try {
+        await useAppStore.getState().deleteSessionPermanently(s.id);
+      } catch (e) {
+        console.warn(
+          `[store] emptyArchive: failed to delete ${s.id}.`,
+          e,
+        );
+      }
+    }
+    return archived.length;
   },
 
   restoreSessionTurns: async (sessionId) => {
