@@ -694,15 +694,24 @@ function applyRuntimeUpdate(
     const session = state.sessions[sessionIndex];
     const newStatus = deriveSessionStatus(session, newRt);
     const newCount = newRt.pendingApprovals.length;
+    // currentStepIndex is what powers the Sidebar's "正在工作 ·
+    // 第 N 步" subline. Sync from runtime.currentTurnIndex
+    // (set by turn_start) so background sessions communicate
+    // their step progress at a glance. `null` from runtime → leave
+    // session.currentStepIndex undefined.
+    const newStep =
+      newRt.currentTurnIndex != null ? newRt.currentTurnIndex : undefined;
     if (
       session.status !== newStatus ||
-      session.pendingApprovalCount !== newCount
+      session.pendingApprovalCount !== newCount ||
+      session.currentStepIndex !== newStep
     ) {
       const sessions = state.sessions.slice();
       sessions[sessionIndex] = {
         ...session,
         status: newStatus,
         pendingApprovalCount: newCount,
+        currentStepIndex: newStep,
       };
       out.sessions = sessions;
     }
@@ -1289,6 +1298,11 @@ export const useAppStore = create<AppStore>((set, get) => ({
         userSubmitTick: rt.userSubmitTick + 1,
         // Wipe leftover streaming buffer from a previous turn.
         inFlightContent: "",
+        // Reset currentTurnIndex so the Sidebar's "正在工作 · 第 N 步"
+        // doesn't briefly show the last turn's step number before
+        // the new agent_runner_loop's turn_start arrives. New
+        // message = new loop = step counter restarts at 1.
+        currentTurnIndex: null,
         // Anchor the offset for the upcoming agent_runner_loop's
         // turn indices. GA will emit turn_end with turnIndex=1,2,3
         // for this user_message; we add this offset to get absolute

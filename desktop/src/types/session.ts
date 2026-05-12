@@ -51,6 +51,16 @@ export interface Session {
    * way display (running spinner / idle + dot / idle).
    */
   hasUnread?: boolean;
+  /**
+   * GA-side per-message step the agent is currently on, surfaced
+   * by `turn_start` IPC. Used by the Sidebar running subline
+   * ("正在工作 · 第 N 步") so background sessions communicate
+   * progress at a glance. Synced from `_runtimes[id].
+   * currentTurnIndex` via `applyRuntimeUpdate`. Cleared (undefined)
+   * on settled states; meaningless when `status !== "running"`.
+   * Not persisted — purely a transient runtime projection.
+   */
+  currentStepIndex?: number;
 
   /** ISO 8601 timestamps. lastActivityAt drives sidebar bucket. */
   lastActivityAt: string;

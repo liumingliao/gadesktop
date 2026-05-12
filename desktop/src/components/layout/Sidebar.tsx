@@ -285,11 +285,14 @@ function SidebarSessionRow({
   const isRunning = session.status === "running";
   // Subline composition:
   //
-  //   running → "正在工作…"
-  //     (No step number — surfacing per-message step here would
-  //     require coupling the sidebar row to runtime state.
-  //     "Activity is happening" is the right granularity for
-  //     this overview; the live step lives in the main view.)
+  //   running + step known → "正在工作 · 第 N 步"
+  //   running + step unknown → "正在工作…"
+  //     N comes from session.currentStepIndex, synced from
+  //     runtime.currentTurnIndex by applyRuntimeUpdate on every
+  //     turn_start. While the bridge hasn't emitted turn_start
+  //     yet (e.g. immediately after user submits) currentStepIndex
+  //     is undefined and we fall back to dots — the user still
+  //     gets the "activity is happening" signal.
   //
   //   settled → "已完成 · {summary}"
   //     "Stops at 第 N 步" reads as "still mid-flight"; the
@@ -306,7 +309,9 @@ function SidebarSessionRow({
     ? stripLegacyStepPrefix(session.summary)
     : null;
   const sublineText = isRunning
-    ? "正在工作…"
+    ? session.currentStepIndex != null
+      ? `正在工作 · 第 ${session.currentStepIndex} 步`
+      : "正在工作…"
     : cleanSummary
       ? `已完成 · ${cleanSummary}`
       : null;
