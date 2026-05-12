@@ -795,16 +795,24 @@ export const useAppStore = create<AppStore>((set, get) => ({
       console.debug("[store] createSession persistSession failed.", e);
     });
     // Soft limit warning. The store doesn't block — power users can
-    // dismiss the toast and keep going. The number is a "you might
-    // want to archive some" line, not a hard limit.
-    const totalNow = get().sessions.length;
-    if (totalNow > 10) {
+    // dismiss the toast and keep going. Counts only NON-archived
+    // rows: archived sessions are already "cleaned up" from the
+    // sidebar (App.tsx filters them out of visibleSessions), so the
+    // user shouldn't be nagged about needing to archive sessions
+    // they've already archived. Previously this counted
+    // `sessions.length` and produced "48 sessions" alarms when the
+    // user had archived 40 of them — a real-world bug surfaced in
+    // dev verify round 8.
+    const liveNow = get().sessions.filter(
+      (s) => s.status !== "archived",
+    ).length;
+    if (liveNow > 10) {
       get().pushToast(
         makeAppError({
           category: "business",
           severity: "warning",
           title: "Session 数量较多",
-          message: `已开 ${totalNow} 个 session — 建议先 archive 几个旧的，否则后台 bridge 进程会越来越占资源。`,
+          message: `已开 ${liveNow} 个 session — 建议先 archive 几个旧的，否则后台 bridge 进程会越来越占资源。`,
           hint: null,
           retryable: false,
           context: "createSession",
