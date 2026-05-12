@@ -7,6 +7,10 @@ import {
   type ComposerLLMOption,
 } from "@/components/conversation/Composer";
 import { Conversation, TurnMarker } from "@/components/conversation/Conversation";
+import {
+  StreamingCursor,
+  TypingDots,
+} from "@/components/conversation/LiveIndicators";
 import { MarkdownView } from "@/components/conversation/MarkdownView";
 import { ThinkingSummary } from "@/components/conversation/ThinkingSummary";
 import { ToolCallout } from "@/components/conversation/ToolCallout";
@@ -231,7 +235,8 @@ export function MainView({
             <ThinkingSummary>
               <>
                 {currentTurnIndex != null && `第 ${currentTurnIndex} 步 · `}
-                思考中…
+                思考中
+                <TypingDots />
               </>
             </ThinkingSummary>
           )}
@@ -240,13 +245,21 @@ export function MainView({
               generation). Renders the LLM's tokens as they arrive
               via turn_progress IPC events. Replaced by the canonical
               AgentTurn the moment turn_end fires (store clears
-              inFlightContent in appendAgentTurn). */}
+              inFlightContent in appendAgentTurn).
+              StreamingCursor below the markdown gives liveness
+              feedback during the gaps between GA's ~50-char delta
+              pushes — without it the partial reads as "stalled"
+              between chunks. Real fix needs token-level streaming
+              from GA core; this is the UI-side mitigation. */}
           {isRunning && !stillWaiting && visiblePartial && (
             <div>
               {currentTurnIndex != null && (
                 <TurnMarker index={currentTurnIndex} />
               )}
               <MarkdownView source={visiblePartial} variant="agent" />
+              <div className="mt-1 leading-none">
+                <StreamingCursor />
+              </div>
             </div>
           )}
         </div>

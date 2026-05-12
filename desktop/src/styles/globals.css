@@ -130,3 +130,40 @@ body {
 .animate-fade-in {
   animation: fade-in 0.18s ease-out;
 }
+
+/* Typing-dot indicator for the "思考中" placeholder. Three dots
+   pulse in sequence (ChatGPT / Claude / Telegram typing pattern).
+   Compensates for the perceived latency before the LLM produces
+   the first streamable chunk. */
+@keyframes typing-dot {
+  0%,
+  60%,
+  100% {
+    opacity: 0.25;
+  }
+  30% {
+    opacity: 1;
+  }
+}
+.typing-dot {
+  animation: typing-dot 1.4s ease-in-out infinite;
+}
+.typing-dot:nth-child(2) {
+  animation-delay: 0.2s;
+}
+.typing-dot:nth-child(3) {
+  animation-delay: 0.4s;
+}
+
+/* Streaming-content cursor — blinking vertical bar appended to the
+   partial render so the user sees something live between GA's
+   ~50-char delta pushes. steps(2) gives a clean on/off blink
+   rather than a sine-fade. */
+@keyframes streaming-cursor-blink {
+  50% {
+    opacity: 0;
+  }
+}
+.streaming-cursor {
+  animation: streaming-cursor-blink 1s steps(2) infinite;
+}
