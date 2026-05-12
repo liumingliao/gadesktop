@@ -101,24 +101,44 @@ function _lruRemove(sessionId: string): void {
 }
 
 /**
- * Shut down the oldest alive bridges until the LRU is at or under cap.
- * Awaited so the caller can sequence subsequent work after suspended
- * processes are actually gone. Errors are caught per-victim — one
- * failing shutdown shouldn't block the rest.
+ * Shut down the oldest non-active, non-running bridges until the LRU
+ * is at or under cap. Awaited so the caller can sequence subsequent
+ * work after suspended processes are actually gone. Errors are caught
+ * per-victim — one failing shutdown shouldn't block the rest.
  *
- * Skips the active session — suspending the one the user is looking
- * at would be the worst possible UX. If the user somehow has > LRU_CAP
- * other-than-active alive (rare: rapid clicking), enforcement still
- * trims everyone else.
+ * Two classes of session are PROTECTED from eviction:
+ *   1. The active session — suspending the one the user is looking
+ *      at would be the worst possible UX.
+ *   2. Sessions with `agentRunning === true` — N-active's core
+ *      promise is "background long tasks keep running". Killing a
+ *      mid-turn bridge loses the in-flight LLM call + tool dispatch;
+ *      the conversation is left in an indeterminate state (no
+ *      turn_end will arrive). Better to temporarily exceed the cap
+ *      by 1-2 alive bridges than break that promise — once a
+ *      protected session finishes, the next spawn will trim it on
+ *      the way out.
+ *
+ * If every alive bridge falls into one of these categories, the
+ * function returns without shutting anything down. The cap will
+ * self-correct on the next spawn after one of them completes.
  */
 async function _enforceLRUCap(): Promise<void> {
-  const activeId = useAppStore.getState().activeSessionId;
   while (_lruOrder.length > LRU_CAP) {
-    // Find the oldest non-active candidate. The active session is
-    // typically at the end (most-recently-touched), but defensive
-    // check covers edge orderings.
-    const victim = _lruOrder.find((id) => id !== activeId);
-    if (!victim) return; // only the active session is alive — leave it
+    const state = useAppStore.getState();
+    const activeId = state.activeSessionId;
+    // Re-evaluate protections every iteration: a previous shutdown
+    // might have changed _runtimes / activeSessionId.
+    const victim = _lruOrder.find(
+      (id) => id !== activeId && !state._runtimes[id]?.agentRunning,
+    );
+    if (!victim) {
+      // Everyone left is either active or mid-turn. Bail and let the
+      // next spawn trigger try again after agents have finished.
+      console.info(
+        `[lru] no eviction candidate (cap=${LRU_CAP}, alive=${_lruOrder.length}); all alive bridges are active or running`,
+      );
+      return;
+    }
     try {
       await useAppStore.getState().shutdownBridge(victim);
     } catch (e) {
