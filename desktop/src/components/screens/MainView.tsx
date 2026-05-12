@@ -14,6 +14,7 @@ import {
 import { MarkdownView } from "@/components/conversation/MarkdownView";
 import { ThinkingSummary } from "@/components/conversation/ThinkingSummary";
 import { ToolCallout } from "@/components/conversation/ToolCallout";
+import { useTypewriter } from "@/hooks/useTypewriter";
 import { cleanPartialContent } from "@/lib/ipc-handlers";
 import { cn } from "@/lib/utils";
 import type {
@@ -103,6 +104,13 @@ export function MainView({
   const visiblePartial = inFlightContent
     ? cleanPartialContent(inFlightContent).trim()
     : "";
+  // Fake-typewriter pass to smooth over GA's ~50-char chunked
+  // delta pushes. See useTypewriter docs for the mitigation
+  // rationale. When the GA-side throttle is eventually fixed and
+  // we get true token-level streaming, this hook becomes a no-op
+  // (reveal already keeps pace with arrivals) and can be removed
+  // without behavior change.
+  const typedPartial = useTypewriter(visiblePartial);
 
   // Sticky-bottom mode for streaming: when the user is "near the
   // bottom" we follow newly-arrived tokens; if they've scrolled up
@@ -126,16 +134,21 @@ export function MainView({
   }, []);
 
   // Stream-follow: while atBottom, pin scroll position to the bottom
-  // as inFlightContent grows. useLayoutEffect runs synchronously
-  // after the new content renders, before the browser paints — so
-  // the user never sees a glimpse of the bottom-having-moved-up
-  // before we snap it back.
+  // as the partial grows. useLayoutEffect runs synchronously after
+  // the new content renders, before the browser paints — so the
+  // user never sees a glimpse of the bottom-having-moved-up before
+  // we snap it back.
+  //
+  // Depends on `typedPartial` (not raw `inFlightContent`) so the
+  // scroll keeps pace with the typewriter's per-frame reveals
+  // rather than only updating on GA's coarser ~50-char chunk
+  // arrivals. scrollTop assignment is O(1) so 60fps is fine.
   useLayoutEffect(() => {
     if (!atBottom) return;
     const el = scrollContainerRef.current;
     if (!el) return;
     el.scrollTop = el.scrollHeight;
-  }, [inFlightContent, atBottom]);
+  }, [typedPartial, atBottom]);
 
   const onClickScrollToBottom = () => {
     const el = scrollContainerRef.current;
@@ -256,7 +269,13 @@ export function MainView({
               {currentTurnIndex != null && (
                 <TurnMarker index={currentTurnIndex} />
               )}
-              <MarkdownView source={visiblePartial} variant="agent" />
+              {/* `typedPartial` is the typewriter-throttled view of
+                  `visiblePartial`. The condition above gates on
+                  visiblePartial (so the placeholder→partial swap
+                  happens the instant GA's first chunk arrives, not
+                  a frame later); the actual render uses typedPartial
+                  so the content reveals character-by-character. */}
+              <MarkdownView source={typedPartial} variant="agent" />
               <div className="mt-1 leading-none">
                 <StreamingCursor />
               </div>
