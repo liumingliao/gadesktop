@@ -52,15 +52,23 @@ export interface Session {
    */
   hasUnread?: boolean;
   /**
-   * GA-side per-message step the agent is currently on, surfaced
-   * by `turn_start` IPC. Used by the Sidebar running subline
-   * ("正在工作 · 第 N 步") so background sessions communicate
-   * progress at a glance. Synced from `_runtimes[id].
-   * currentTurnIndex` via `applyRuntimeUpdate`. Cleared (undefined)
-   * on settled states; meaningless when `status !== "running"`.
-   * Not persisted — purely a transient runtime projection.
+   * GA-side per-message step the agent **most recently finished**
+   * (the turnIndex passed in the last `turn_end` event for the
+   * current user_message's loop). Surfaced by the Sidebar running
+   * subline as "第 N 步 · {summary}" — each tick is a real
+   * completed-step recap rather than a still-in-flight guess.
+   *
+   * The sidebar intentionally lags one step behind the main view:
+   * we trade real-time accuracy for paired step-number + summary
+   * (which only become consistent at turn_end). Users wanting the
+   * truly-current step can click into the conversation, where the
+   * thinking placeholder and TurnMarker surface live progress.
+   *
+   * Written by `bumpSessionAfterTurn` on each turn_end; transient
+   * (in-memory only, not persisted — meaningful only while the
+   * runtime is alive).
    */
-  currentStepIndex?: number;
+  lastStepIndex?: number;
 
   /** ISO 8601 timestamps. lastActivityAt drives sidebar bucket. */
   lastActivityAt: string;

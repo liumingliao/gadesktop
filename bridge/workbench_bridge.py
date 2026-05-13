@@ -51,6 +51,7 @@ from bridge.ipc import (
     ToolCallPendingEvent,
     TurnEndEvent,
     TurnProgressEvent,
+    TurnStartEvent,
     UserMessageCommand,
     decode_command,
     encode,
@@ -316,6 +317,18 @@ class Bridge:
         self.shutdown_event = threading.Event()
         self.run_in_progress = threading.Event()
         self.current_turn: int = 0
+        # turn_start dedupe state. Two emitters share this:
+        #   1. WorkbenchHandler.tool_before_callback (real-time, fires
+        #      when GA enters tool dispatch for the current turn).
+        #   2. _on_turn_end's predict-emit (fires turn_start(turn+1)
+        #      right after the just-finished turn's TurnEndEvent, so
+        #      the sidebar updates immediately instead of waiting
+        #      several seconds for the next turn's LLM call to
+        #      complete and tool dispatch to begin).
+        # Reset to 0 on every put_task (new agent_runner_loop = turn
+        # counter restarts at 1) so dedupe doesn't accidentally
+        # suppress the first turn_start of a new run.
+        self._last_emitted_turn: int = 0
         # Resolved during start():
         self.agent: Any = None
         self.agentmain: Any = None
@@ -374,6 +387,13 @@ class Bridge:
                     # can flip the flag at runtime without rebuilding the
                     # handler. needs_approval() calls this on every dispatch.
                     yolo_check=lambda: bridge_self.state.yolo_mode,
+                    # turn_start emission: GA's agent_runner_loop has no
+                    # turn_start_callback, but it sets handler.current_turn
+                    # before each tool dispatch and calls
+                    # tool_before_callback. WorkbenchHandler detects the
+                    # turn change there and invokes this callback so the
+                    # desktop sidebar can show "正在工作 · 第 N 步" live.
+                    turn_started_callback=bridge_self._emit_turn_start,
                 )
 
         # agentmain bound the name at import time (`from ga import
@@ -387,6 +407,42 @@ class Bridge:
         self.agent._turn_end_hooks[f"workbench_{self.session_id}"] = self._on_turn_end
 
     # ---------------- Event emission ----------------
+
+    def _emit_turn_start(self, turn_index: int) -> None:
+        """Fire when GA enters a new agent_runner_loop iteration.
+
+        Two emitters call this (both deduped via _last_emitted_turn):
+
+          1. WorkbenchHandler.tool_before_callback: real-time emission
+             when GA actually reaches tool dispatch for the current
+             turn. This is the authoritative "we are on step N" signal,
+             but it lands several seconds *after* the turn started
+             (LLM call has to complete first).
+          2. _on_turn_end predict-emit: right after the just-finished
+             turn's TurnEndEvent, if GA is going to keep looping
+             (exit_reason empty), we pre-announce turn N+1. The sidebar
+             updates immediately, matching what the user sees in the
+             main view (turn_progress is already streaming N+1's
+             content by then).
+
+        Dedupe keeps the two emitters from double-firing turn_start
+        for the same N. Reset to 0 on each put_task in dispatch_command
+        so a new agent_runner_loop's turn 1 isn't accidentally
+        suppressed when the previous run also ended at turn 1.
+
+        turn_index is GA's per-message turn number (1-based, resets at
+        every new user_message — matches what the conversation view's
+        TurnMarker shows).
+        """
+        if turn_index == self._last_emitted_turn:
+            return
+        self._last_emitted_turn = turn_index
+        self._emit(
+            TurnStartEvent(
+                sessionId=self.session_id,
+                turnIndex=turn_index,
+            )
+        )
 
     def _emit_ready(self) -> None:
         ga_commit, ga_commit_date = _resolve_ga_commit(self.ga_path)
@@ -573,6 +629,17 @@ class Bridge:
                     )
                 )
                 self.run_in_progress.clear()
+            else:
+                # Predict-emit turn_start(turn+1): GA is going to keep
+                # looping, but the actual `tool_before_callback` for the
+                # next turn won't fire until that turn's LLM call has
+                # fully completed (several seconds later). Without this,
+                # the sidebar subline drops to "正在工作…" during the
+                # next turn's LLM streaming even though the main view
+                # is clearly already showing N+1's content. The dedupe
+                # inside `_emit_turn_start` makes the eventual real
+                # tool_before_callback a no-op.
+                self._emit_turn_start(turn + 1)
         except Exception as e:
             self._emit_error(f"turn_end_hook failed: {e}", traceback.format_exc())
 
@@ -633,6 +700,11 @@ class Bridge:
 
     def dispatch_command(self, cmd: Command) -> None:
         if isinstance(cmd, UserMessageCommand):
+            # New put_task = new agent_runner_loop, turn counter restarts
+            # at 1. Reset dedupe so the first turn_start(1) of the new
+            # run isn't suppressed when the previous run also ended at
+            # turn 1.
+            self._last_emitted_turn = 0
             self.run_in_progress.set()
             display_queue = self.agent.put_task(
                 cmd.text, source="workbench", images=cmd.images
@@ -647,6 +719,9 @@ class Bridge:
                     context="approval_response",
                 )
         elif isinstance(cmd, AskUserResponseCommand):
+            # Same as UserMessage above — ask_user response triggers a
+            # fresh agent_runner_loop with turn counter restarting at 1.
+            self._last_emitted_turn = 0
             self.run_in_progress.set()
             display_queue = self.agent.put_task(cmd.text, source="workbench")
             self._start_progress_drain(display_queue)

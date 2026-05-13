@@ -185,7 +185,6 @@ export interface SessionRuntime {
   pendingApprovals: PendingApproval[];
   agentRunning: boolean;
   currentTurnIndex: number | null;
-  userSubmitTick: number;
   inFlightContent: string;
   approvalDecisions: Record<string, ApprovalDecision>;
   bridgeStatus: BridgeStatus;
@@ -373,7 +372,6 @@ function emptyRuntime(): SessionRuntime {
     pendingApprovals: [],
     agentRunning: false,
     currentTurnIndex: null,
-    userSubmitTick: 0,
     inFlightContent: "",
     approvalDecisions: {},
     bridgeStatus: "idle",
@@ -420,6 +418,18 @@ interface State {
    * Composer / Inspector display.
    */
   llmDisplayName: string;
+  /**
+   * One-shot LLM index to apply when the *next* freshly-created
+   * session spawns its bridge. Set by EmptyState's inline LLM picker
+   * (no active session yet, so there's no live bridge to `set_llm`
+   * against). Consumed by `activateSession` when it spawns a bridge
+   * for a session with zero turns; cleared on any activateSession
+   * call so the pick doesn't leak into a later, unrelated session.
+   *
+   * Not persisted — a fresh launch should fall back to GA's mykey.py
+   * default until the user picks again.
+   */
+  pendingLLMIndex: number | undefined;
   runtimeInfo: RuntimeInfo;
 
   // ---- Approval (global) ----
@@ -477,10 +487,16 @@ interface State {
    */
   currentTurnIndex: number | null;
   /**
-   * Monotonic counter incremented every time the user submits a
-   * message on the active session (via `appendUserTurn`). MainView's
-   * scroll effect uses this as a trigger to snap the just-submitted
-   * user message to the viewport top.
+   * Global monotonic counter incremented every time the user submits
+   * a message (via `appendUserTurn`) in ANY session. MainView's
+   * stick-to-top scroll effect uses this as a trigger.
+   *
+   * Used to be per-session (lived on SessionRuntime); moved global so
+   * switching sessions doesn't change the projection value and thus
+   * doesn't misfire the scroll effect. The effect only ever cares
+   * about "did the user just submit?" — there's no use case for
+   * "remember per-session submit counts", so per-session storage was
+   * an over-abstraction.
    */
   userSubmitTick: number;
   inFlightContent: string;
@@ -683,6 +699,15 @@ interface Actions {
    * has its own currently-selected LLM in N-active.
    */
   replaceLLMs: (sessionId: string, llms: LLMOption[]) => void;
+  /**
+   * Pick the LLM for the next freshly-created session. Used by
+   * EmptyState's inline picker — there's no live bridge yet, so we
+   * can't `set_llm` over IPC; instead we stash `pendingLLMIndex` and
+   * let `activateSession`'s spawnBridge call forward it as
+   * `--llm-no`. Also flips `isCurrent` on the top-level `llms`
+   * projection so the Composer pill reflects the pick immediately.
+   */
+  selectLLMForNewSession: (index: number) => void;
 
   // Conversation (per-session — sessionId required)
   appendUserTurn: (sessionId: string, text: string) => void;
@@ -773,24 +798,24 @@ function applyRuntimeUpdate(
     const session = state.sessions[sessionIndex];
     const newStatus = deriveSessionStatus(session, newRt);
     const newCount = newRt.pendingApprovals.length;
-    // currentStepIndex is what powers the Sidebar's "正在工作 ·
-    // 第 N 步" subline. Sync from runtime.currentTurnIndex
-    // (set by turn_start) so background sessions communicate
-    // their step progress at a glance. `null` from runtime → leave
-    // session.currentStepIndex undefined.
-    const newStep =
-      newRt.currentTurnIndex != null ? newRt.currentTurnIndex : undefined;
+    // Sidebar's running subline used to sync runtime.currentTurnIndex
+    // → session.currentStepIndex here to show the live "正在工作 ·
+    // 第 N 步" header. That field is gone now — the sidebar reads
+    // `session.lastStepIndex` (written by bumpSessionAfterTurn on
+    // each turn_end) instead, trading one step of lag for paired
+    // step-number + summary. Main-view's thinking placeholder still
+    // reads `runtime.currentTurnIndex` directly (via the top-level
+    // projection), so the live step number is preserved where it
+    // actually matters.
     if (
       session.status !== newStatus ||
-      session.pendingApprovalCount !== newCount ||
-      session.currentStepIndex !== newStep
+      session.pendingApprovalCount !== newCount
     ) {
       const sessions = state.sessions.slice();
       sessions[sessionIndex] = {
         ...session,
         status: newStatus,
         pendingApprovalCount: newCount,
-        currentStepIndex: newStep,
       };
       out.sessions = sessions;
     }
@@ -808,7 +833,6 @@ function projectionFrom(rt: SessionRuntime): {
   pendingApprovals: PendingApproval[];
   agentRunning: boolean;
   currentTurnIndex: number | null;
-  userSubmitTick: number;
   inFlightContent: string;
   approvalDecisions: Record<string, ApprovalDecision>;
   bridgeStatus: BridgeStatus;
@@ -822,7 +846,6 @@ function projectionFrom(rt: SessionRuntime): {
     pendingApprovals: rt.pendingApprovals,
     agentRunning: rt.agentRunning,
     currentTurnIndex: rt.currentTurnIndex,
-    userSubmitTick: rt.userSubmitTick,
     inFlightContent: rt.inFlightContent,
     approvalDecisions: rt.approvalDecisions,
     bridgeStatus: rt.bridgeStatus,
@@ -988,6 +1011,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
   activeSessionId: undefined,
   projects: [],
   activeProjectFilter: undefined,
+  pendingLLMIndex: undefined,
   // llms / llmDisplayName are populated by the trailing
   // `...projectionFrom(emptyRuntime())` spread below — emptyRuntime
   // seeds DEMO_LLMS / DEMO_LLM_DISPLAY_NAME so Composer renders a
@@ -1002,6 +1026,10 @@ export const useAppStore = create<AppStore>((set, get) => ({
   toasts: [],
 
   _runtimes: {},
+
+  // Global counter, not projected from any runtime — see State's
+  // userSubmitTick doc comment.
+  userSubmitTick: 0,
 
   // Top-level projection starts as the empty runtime (no active
   // session yet). setActiveSession refreshes these.
@@ -1121,7 +1149,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
     return id;
   },
 
-  bumpSessionAfterTurn: (sessionId, summary, _stepNumber) => {
+  bumpSessionAfterTurn: (sessionId, summary, stepNumber) => {
     const now = new Date().toISOString();
     // Inbox-style unread: a finished turn in a non-active session
     // is new content the user hasn't seen. The active session
@@ -1137,27 +1165,36 @@ export const useAppStore = create<AppStore>((set, get) => ({
         // Store raw summary text — no "第 N 步 · " or "已完成 · "
         // prefix at the storage layer. Sidebar rendering decides
         // what prefix to add based on the session's current state
-        // ("正在工作…" while running, "已完成 · {summary}" once
-        // settled). This keeps presentation flexible without DB
-        // migrations, and the same summary string can serve both
-        // running and finished views.
+        // ("第 N 步 · {summary}" while running, "已完成 · {summary}"
+        // once settled). Same summary string serves both, no DB
+        // migration needed.
         //
-        // _stepNumber kept in the signature for API stability —
-        // earlier prefix format used it. No longer consumed; the
-        // step-N display lives in the main view's TurnMarker.
+        // stepNumber is the per-message GA turnIndex of the step
+        // that just finished. We pair it with the summary so the
+        // sidebar running subline "第 N 步 · X" shows the
+        // most-recently-completed step's number AND its recap —
+        // both pieces describe the same step, no semantic mismatch.
         //
         // When the bridge didn't emit a summary we keep the
         // previous one rather than wipe it — staleness beats
         // blanking the row on every turn.
         const nextSummary =
           summary && summary.trim() ? truncateSummary(summary) : s.summary;
+        // Don't write `status: "idle"` here — status is derived
+        // from runtime by `deriveSessionStatus` (via
+        // `applyRuntimeUpdate`'s in-place sync). turn_end is
+        // per-step, not terminal; forcing "idle" here was the
+        // reason the sidebar flipped to "已完成" mid-run.
         updated = {
           ...s,
           turnCount,
           summary: nextSummary,
+          lastStepIndex:
+            typeof stepNumber === "number" && stepNumber > 0
+              ? stepNumber
+              : s.lastStepIndex,
           lastActivityAt: now,
           updatedAt: now,
-          status: "idle",
           hasUnread: becameUnread ? true : s.hasUnread,
         };
         return updated;
@@ -1220,10 +1257,29 @@ export const useAppStore = create<AppStore>((set, get) => ({
       const project = session?.projectId
         ? get().projects.find((p) => p.id === session.projectId)
         : undefined;
+      // EmptyState's inline LLM picker stashes `pendingLLMIndex`
+      // because there was no live bridge to set_llm against. Apply
+      // it here as `--llm-no` only when the session is genuinely
+      // fresh — re-activating an existing session must respect that
+      // session's own `set_llm` history. Always clear pending after
+      // this activation so an abandoned pick (user picked LLM,
+      // then clicked an existing session) doesn't leak into a later
+      // unrelated spawn.
+      const pendingLLMIndex = get().pendingLLMIndex;
+      const rtNow = get()._runtimes[id];
+      const isFreshSession =
+        (session?.turnCount ?? 0) === 0 &&
+        (!rtNow || rtNow.turns.length === 0);
+      const consumePending =
+        isFreshSession && pendingLLMIndex !== undefined;
+      if (pendingLLMIndex !== undefined) {
+        set({ pendingLLMIndex: undefined });
+      }
       await get().spawnBridge({
         ...get().gaConfig,
         sessionId: id,
         cwd: project?.rootPath ?? undefined,
+        llmIndex: consumePending ? pendingLLMIndex : undefined,
       });
     } else {
       // Already alive — mark as most-recently-used so the LRU
@@ -1761,6 +1817,19 @@ export const useAppStore = create<AppStore>((set, get) => ({
     });
   },
 
+  selectLLMForNewSession: (index) => {
+    set((state) => {
+      const list = state.llms;
+      if (index < 0 || index >= list.length) return {};
+      const next = list.map((opt, i) => ({ ...opt, isCurrent: i === index }));
+      return {
+        llms: next,
+        llmDisplayName: next[index].displayName,
+        pendingLLMIndex: index,
+      };
+    });
+  },
+
   // ---- Conversation (per-session) ----
   appendUserTurn: (sessionId, text) => {
     let titleDerived: { sessionId: string; title: string } | null = null;
@@ -1779,9 +1848,6 @@ export const useAppStore = create<AppStore>((set, get) => ({
         // the round-trip would re-introduce the latency we're
         // masking with the thinking placeholder.
         agentRunning: true,
-        // Drive MainView's stick-to-top scroll. See `userSubmitTick`
-        // doc comment in State.
-        userSubmitTick: rt.userSubmitTick + 1,
         // Wipe leftover streaming buffer from a previous turn.
         inFlightContent: "",
         // Reset currentTurnIndex so the Sidebar's "正在工作 · 第 N 步"
@@ -1795,6 +1861,11 @@ export const useAppStore = create<AppStore>((set, get) => ({
         // session-wide turn indices used by SQLite and the UI.
         turnIndexOffset: currentTurnCount,
       }));
+      // Bump the global submit tick (top-level, not on the runtime)
+      // so MainView's stick-to-top scroll fires. Lives at top-level
+      // because session switching shouldn't trigger this effect —
+      // see `userSubmitTick` doc comment in State.
+      update.userSubmitTick = state.userSubmitTick + 1;
       // Derive a Sidebar title from the first user message — but only
       // once, and only when the row is still wearing the seed
       // "新对话" placeholder. Renaming a user-edited title would be
@@ -1850,11 +1921,17 @@ export const useAppStore = create<AppStore>((set, get) => ({
       applyRuntimeUpdate(state, sessionId, (rt) => ({
         ...rt,
         turns: [...rt.turns, turn],
-        // turn_end is the canonical "agent finished this round"
-        // signal. ipc-handlers also clears agentRunning on `error`/
-        // `run_complete` for the failure paths where turn_end never
-        // arrives.
-        agentRunning: false,
+        // turn_end is per-step inside GA's agent_runner_loop, NOT the
+        // terminal signal — a single user message can produce 20+
+        // turn_end events before the run actually exits. Keep
+        // agentRunning true so the sidebar stays on "正在工作 · 第 N
+        // 步" and the main view keeps showing the thinking placeholder
+        // / streaming partial across step boundaries. Only
+        // `run_complete` / `error` / bridge `onClose` flip it false.
+        // currentTurnIndex clears so the brief gap between this
+        // turn_end and the next turn_start renders as generic
+        // "正在工作…" / "思考中…" instead of stale "第 N 步".
+        currentTurnIndex: null,
         // Finalised turn replaces the streaming buffer.
         inFlightContent: "",
       })),
@@ -1998,6 +2075,15 @@ export const useAppStore = create<AppStore>((set, get) => ({
               ...rt,
               bridgeStatus: "closed",
               bridgePid: null,
+              // Safety net for bridge crash / kill / LRU suspend:
+              // turn_end no longer clears agentRunning (it's per-step,
+              // not terminal), so without this `onClose` cleanup a
+              // bridge dying mid-run would leave the sidebar stuck on
+              // "正在工作". `run_complete` / `error` cover the graceful
+              // exits; onClose catches everything else.
+              agentRunning: false,
+              currentTurnIndex: null,
+              inFlightContent: "",
             })),
           );
         },

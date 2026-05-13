@@ -2,6 +2,7 @@ import * as Dialog from "@radix-ui/react-dialog";
 import { Check, Lightning, X } from "@phosphor-icons/react";
 import { useState } from "react";
 
+import { IconTooltip } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import type { ApprovalConfig } from "@/components/screens/settings/Settings";
 
@@ -80,6 +81,19 @@ export function SettingsApproval({
         }}
       />
 
+      {/* "Rules are disabled" announcement banner — kept OUTSIDE the
+          dimmed container below so it stays at full opacity (it's a
+          status banner, not part of the disabled content) and so the
+          outer space-y-7 gives it normal 28px clearance from the
+          disabled section. Previously it lived inside the opacity-50
+          container with a -mb-2 negative margin and ended up
+          overlapping the "Approval-required tools" header. */}
+      {yoloMode && (
+        <div className="text-[12px] italic text-ink-muted">
+          YOLO 已开启，下列规则当前不生效（关闭 YOLO 后恢复）。
+        </div>
+      )}
+
       <div
         className={cn(
           "space-y-7",
@@ -92,12 +106,6 @@ export function SettingsApproval({
             : undefined
         }
       >
-        {yoloMode && (
-          <div className="-mb-2 text-[12px] italic text-ink-muted">
-            YOLO 已开启，下列规则当前不生效（关闭 YOLO 后恢复）。
-          </div>
-        )}
-
         <div>
           <SubLabel>Approval-required tools</SubLabel>
           <div className="mt-2 space-y-1">
@@ -199,10 +207,14 @@ function YoloSection({
           />
           <div className="min-w-0 flex-1">
             <div className="font-serif text-[14px] font-medium text-ink">
-              YOLO 模式
+              <IconTooltip text="You Only Live Once · 跳过审批让 agent 自主运行，适合在隔离环境完全信任 agent 时使用">
+                <span className="cursor-help underline decoration-line-strong decoration-dotted underline-offset-[3px]">
+                  YOLO 模式
+                </span>
+              </IconTooltip>
             </div>
             <div className="mt-1 text-[12px] text-ink-muted">
-              跳过所有 tool 调用的审批，直接执行——适合完全信任 agent + 沙盒环境
+              跳过所有操作的审批，agent 自主执行 — 适合完全信任 agent 的沙盒环境
             </div>
           </div>
         </div>

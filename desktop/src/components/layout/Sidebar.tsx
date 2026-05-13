@@ -284,7 +284,7 @@ function SidebarQuickActions({
   activeProjectName?: string;
 }) {
   const newChatLabel = activeProjectName
-    ? `New chat in 📂 ${activeProjectName}`
+    ? `New Chat in 📂 ${activeProjectName}`
     : "New Chat";
   return (
     <div className="border-b border-line py-1.5">
@@ -430,21 +430,27 @@ function SidebarSessionRow({
   const isRunning = session.status === "running";
   // Subline composition:
   //
-  //   running + step known → "正在工作 · 第 N 步"
-  //   running + step unknown → "正在工作…"
-  //     N comes from session.currentStepIndex, synced from
-  //     runtime.currentTurnIndex by applyRuntimeUpdate on every
-  //     turn_start. While the bridge hasn't emitted turn_start
-  //     yet (e.g. immediately after user submits) currentStepIndex
-  //     is undefined and we fall back to dots — the user still
-  //     gets the "activity is happening" signal.
+  //   running + last completed step known → "第 N 步 · {summary}"
+  //     N is the most-recently-finished step (session.lastStepIndex),
+  //     written by bumpSessionAfterTurn on each turn_end. The
+  //     summary is GA's per-step recap for THAT same step — so
+  //     the number and the text describe the same event, no
+  //     semantic mismatch. The sidebar deliberately lags one
+  //     step behind real-time: users wanting truly-current
+  //     state click into the conversation where TurnMarker and
+  //     the thinking placeholder show live progress.
+  //
+  //   running + no step finished yet → "思考中…"
+  //     The first step's LLM call has just begun — no turn_end
+  //     has fired so we have no completed-step recap. Same
+  //     language as MainView's in-progress placeholder for a
+  //     unified register.
   //
   //   settled → "已完成 · {summary}"
-  //     "Stops at 第 N 步" reads as "still mid-flight"; the
-  //     past-tense "已完成 ·" prefix shifts the register to
-  //     "this conversation is done, here's the recap". The {summary}
-  //     itself is GA's third-person past-tense one-liner so it
-  //     reads naturally after the prefix.
+  //     Same {summary} as the running row's final tick — the
+  //     transition from running→settled keeps the recap text
+  //     stable and only swaps the prefix (and the icon flips
+  //     from spinner to check). Visual continuity for the user.
   //
   // Legacy data: pre-this-change rows wrote
   // "第 N 步 · {summary}" into session.summary directly. Strip
@@ -454,9 +460,9 @@ function SidebarSessionRow({
     ? stripLegacyStepPrefix(session.summary)
     : null;
   const sublineText = isRunning
-    ? session.currentStepIndex != null
-      ? `正在工作 · 第 ${session.currentStepIndex} 步`
-      : "正在工作…"
+    ? session.lastStepIndex != null && cleanSummary
+      ? `第 ${session.lastStepIndex} 步 · ${cleanSummary}`
+      : "思考中…"
     : cleanSummary
       ? `已完成 · ${cleanSummary}`
       : null;

@@ -85,6 +85,9 @@ function App() {
   const emptyArchive = useAppStore((s) => s.emptyArchive);
   const llms = useAppStore((s) => s.llms);
   const llmDisplayName = useAppStore((s) => s.llmDisplayName);
+  const selectLLMForNewSession = useAppStore(
+    (s) => s.selectLLMForNewSession,
+  );
   const runtimeInfo = useAppStore((s) => s.runtimeInfo);
 
   const approvalDecisions = useAppStore((s) => s.approvalDecisions);
@@ -365,13 +368,13 @@ function App() {
               llmDisplayName={llmDisplayName}
               llms={llms}
               onSelectLLM={(idx) => {
-                if (!activeSessionId) return;
-                if (bridgeStatus === "connected") {
-                  void sendIPCCommand(activeSessionId, {
-                    kind: "set_llm",
-                    llmIndex: idx,
-                  });
-                }
+                // EmptyState always configures the *next* new
+                // session: stash pendingLLMIndex + flip the
+                // top-level llms projection so the Composer pill
+                // reflects the pick. activateSession consumes
+                // pendingLLMIndex when submitOnEmpty creates and
+                // spawns the fresh session.
+                selectLLMForNewSession(idx);
               }}
               onOpenLLMSwitcher={() => setPaletteOpen(true)}
               onSubmit={(t) => {
@@ -462,6 +465,7 @@ function App() {
               currentTurnIndex={currentTurnIndex}
               userSubmitTick={userSubmitTick}
               inFlightContent={inFlightContent}
+              activeSessionId={activeSessionId}
             />
           )
         }

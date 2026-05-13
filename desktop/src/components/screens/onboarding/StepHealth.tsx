@@ -62,7 +62,7 @@ export function StepHealth({
           className="mt-0.5 shrink-0 text-ink-muted"
         />
         <div>
-          跳过了 LLM session dry-run 以避免消耗 quota。第一次发送消息时如有问题
+          跳过了 LLM 连接测试以节省费用。第一次发送消息时如有问题
           会提示具体错误并给出修复路径。
         </div>
       </div>

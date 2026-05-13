@@ -139,7 +139,7 @@ export function CreateProjectDialog({
 
             <Field
               label="项目文件夹"
-              hint="可选 · 设置后，该项目下的 session 会以此目录作为 GA 子进程的 cwd"
+              hint="可选 · 项目里的对话以此文件夹为工作区"
             >
               <div className="flex gap-2">
                 <input

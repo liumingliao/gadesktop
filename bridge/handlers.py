@@ -67,6 +67,7 @@ class WorkbenchHandler(GenericAgentHandler):  # type: ignore[misc]  # GA has no 
         always_allow_global: set[str] | None = None,
         always_allow_project: set[str] | None = None,
         yolo_check: Callable[[], bool] | None = None,
+        turn_started_callback: Callable[[int], None] | None = None,
     ) -> None:
         super().__init__(parent, last_history, cwd)
         self._request_approval = request_approval
@@ -89,6 +90,52 @@ class WorkbenchHandler(GenericAgentHandler):  # type: ignore[misc]  # GA has no 
         # mutable-set pattern used for always_allow_* above. Default to
         # "always False" when not provided (test paths, legacy callers).
         self._yolo_check: Callable[[], bool] = yolo_check or (lambda: False)
+        # GA has no turn_start_callback extension point, so we synthesize
+        # one: tool_before_callback fires before every dispatch and by
+        # then agent_runner_loop has already set `self.current_turn`.
+        # Dedupe (multi-tool turn → single emit, plus coordination with
+        # the bridge's predict-emit path) lives on the bridge side now
+        # — see workbench_bridge._emit_turn_start. The handler just
+        # passes the current turn number through.
+        self._turn_started_callback: Callable[[int], None] | None = (
+            turn_started_callback
+        )
+
+    def tool_before_callback(
+        self,
+        tool_name: str,
+        args: dict[str, Any],
+        response: Any,
+    ) -> None:
+        """Notify the bridge of the GA-side turn number.
+
+        Called by `agent_runner_loop` via `try_call_generator` before
+        each tool dispatch (agent_loop.py:22). By this point, the loop
+        has set `self.current_turn` (agent_loop.py:74) to the current
+        1-based turn number.
+
+        Even the "no-tool" final-answer turn fires dispatch (with
+        tool_name='no_tool', backed by GenericAgentHandler.do_no_tool),
+        so every turn — intermediate and final — surfaces here.
+
+        Dedupe is centralized on the bridge: a multi-tool turn fires
+        this multiple times for the same `current_turn`, and the
+        bridge's predict-emit in `_on_turn_end` races us on turn N+1,
+        but both paths funnel through `_emit_turn_start` which suppresses
+        repeat-Ns.
+
+        We don't call super().tool_before_callback(): GA's BaseHandler
+        default is `pass` and GenericAgentHandler does not override it.
+        """
+        current = int(getattr(self, "current_turn", 0) or 0)
+        if current and self._turn_started_callback is not None:
+            try:
+                self._turn_started_callback(current)
+            except Exception:
+                # Never let an emit error crash the GA loop —
+                # turn_start is purely a UX signal; the run keeps
+                # going either way.
+                pass
 
     def update_approval_rules(
         self,

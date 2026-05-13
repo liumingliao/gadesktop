@@ -121,10 +121,10 @@ export function HealthCheckCard({
       {renderFooter && (
         <div className="mt-3 border-t border-line pt-3 text-[12.5px] text-ink-soft">
           {summary.failed > 0
-            ? `Fix ${summary.failed} issue${summary.failed > 1 ? "s" : ""} to continue`
+            ? `修复 ${summary.failed} 个问题后继续`
             : summary.running > 0
               ? "正在检查最后一项…"
-              : "All checks passed"}
+              : "全部检查通过"}
         </div>
       )}
     </div>

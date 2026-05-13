@@ -168,11 +168,13 @@ export function dispatchIPCEvent(
       // the user expects.
       const turn = turnFromTurnEnd(event);
       s.appendAgentTurn(event.sessionId, turn);
-      // Defensive: appendAgentTurn already sets agentRunning=false in
-      // its reducer, but call it again here so the IPC layer is
-      // self-contained — anyone tracing event flow without reading
-      // the store action sees the state transition explicitly.
-      s.setAgentRunning(event.sessionId, false);
+      // No setAgentRunning(false) here — turn_end is per-step inside
+      // GA's agent_runner_loop, not the run terminus. agentRunning
+      // stays true until `run_complete` / `error` / bridge close so
+      // the sidebar and main view correctly reflect a multi-step
+      // run in progress. (Prior code cleared it on every turn_end,
+      // which made the sidebar flip to "已完成" after step 1 of an
+      // N-step run.)
       // Update the session row (turn_count + last_activity_at +
       // summary). Sidebar `第 N 步 · {summary}` previews also use
       // the per-message step (matches what the user sees in the

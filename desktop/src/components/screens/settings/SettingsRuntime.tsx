@@ -39,13 +39,13 @@ export function SettingsRuntime({
     <div className="space-y-7">
       <SectionTitle
         title="Runtime"
-        subtitle="GA 子进程的启动参数 · 改动后需要重启 Workbench"
+        subtitle="GA 的启动参数 · 改动后需要重启 Workbench"
       />
 
       <PathField label="GA Path" value={info.gaPath} onPick={onChangeGAPath} />
 
       <PathField
-        label="Bridge Python"
+        label="Python"
         value={info.pythonVersion}
         // Picker intentionally not wired — Tauri's shell:allow-spawn
         // capability only permits the `python3` / `python` aliases
@@ -54,7 +54,7 @@ export function SettingsRuntime({
         // edit src-tauri/capabilities/default.json.
         onPick={onChangeBridgePython}
         readOnly
-        hint="使用 PATH 中的 python3 · 自定义路径需编辑 capabilities/default.json"
+        hint="使用系统默认的 python3 · 自定义路径需手动编辑 Workbench 配置文件"
       />
 
       <GAVersionCard
@@ -125,7 +125,7 @@ function GAVersionCard({
       <SubLabel>GA Version</SubLabel>
       <div className="mt-2 rounded-sm border border-line bg-surface px-3 py-2.5">
         <div className="flex items-center gap-2 font-mono text-[12.5px] text-ink">
-          <span className="text-ink-muted">当前</span>
+          <span className="text-ink-muted">当前版本</span>
           <span>{currentShort}</span>
           {currentDate && (
             <span className="text-ink-muted">· {currentDate}</span>
@@ -133,7 +133,7 @@ function GAVersionCard({
         </div>
         {!isUnknown && (
           <div className="mt-1 flex items-center gap-2 font-mono text-[12px] text-ink-soft">
-            <span className="text-ink-muted">Baseline</span>
+            <span className="text-ink-muted">已验证版本</span>
             <span>{baselineShort}</span>
             <span
               className={cn(
@@ -159,7 +159,7 @@ function GAVersionCard({
         )}
       </div>
       <p className="mt-2 text-[11.5px] leading-[1.55] text-ink-muted">
-        新 commit 可能引入兼容问题，bridge 启动体检会报告。
+        新 commit 可能引入兼容问题，下次启动时会自动检查并报告。
       </p>
     </div>
   );

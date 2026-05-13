@@ -295,8 +295,8 @@ function RootPage({
       >
         <PaletteRow
           Icon={Cube}
-          label="Switch LLM"
-          sub={currentLLM ? `current: ${currentLLM}` : undefined}
+          label="切换 LLM"
+          sub={currentLLM ? `当前：${currentLLM}` : undefined}
           shortcut="→"
         />
       </Command.Item>
@@ -304,16 +304,16 @@ function RootPage({
         value="rerun health check 体检"
         onSelect={onReRunHealthCheck}
       >
-        <PaletteRow Icon={ArrowsClockwise} label="Re-run health check" />
+        <PaletteRow Icon={ArrowsClockwise} label="重新运行健康检查" />
       </Command.Item>
       <Command.Item value="open settings 设置" onSelect={onOpenSettings}>
-        <PaletteRow Icon={Gear} label="Open settings" shortcut="⌘," />
+        <PaletteRow Icon={Gear} label="打开设置" shortcut="⌘," />
       </Command.Item>
       <Command.Item
         value="attach ga folder 切换 GA 路径"
         onSelect={onAttachGAFolder}
       >
-        <PaletteRow Icon={FolderOpen} label="Attach GA folder" />
+        <PaletteRow Icon={FolderOpen} label="切换 GA 路径" />
       </Command.Item>
     </>
   );

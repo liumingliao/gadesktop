@@ -14,6 +14,7 @@ import {
 import { MarkdownView } from "@/components/conversation/MarkdownView";
 import { ThinkingSummary } from "@/components/conversation/ThinkingSummary";
 import { ToolCallout } from "@/components/conversation/ToolCallout";
+import { IconTooltip } from "@/components/ui/tooltip";
 import { useTypewriter } from "@/hooks/useTypewriter";
 import { cleanPartialContent } from "@/lib/ipc-handlers";
 import { cn } from "@/lib/utils";
@@ -33,6 +34,11 @@ export interface MainViewProps {
    * Threaded through to ToolCallout → ApprovalForm so the "Always
    * allow in {projectName}" decision button can show context. */
   projectName?: string;
+  /** Active session's id. MainView watches it to scroll to the bottom
+   * of the new conversation when the user switches sessions. The
+   * component doesn't read or display the id, just uses identity
+   * change as the trigger. Undefined during pre-session screens. */
+  activeSessionId?: string;
   onSubmit?: (text: string) => void;
   onApprove?: (approvalId: string, decision: ApprovalDecision) => void;
   onAdvanceApproval?: (next: PendingApproval) => void;
@@ -87,6 +93,7 @@ export function MainView({
   pendingApprovals = [],
   approvalDecisions,
   projectName,
+  activeSessionId,
   onSubmit,
   onApprove,
   onAdvanceApproval,
@@ -164,6 +171,81 @@ export function MainView({
     // are followed without a frame's gap.
     setAtBottom(true);
   };
+
+  // atBottom mirror for use inside async callbacks (ResizeObserver
+  // below) where the captured closure would otherwise see a stale
+  // boolean. The effect-based sync (rather than a render-phase
+  // assignment) keeps the react-hooks lint rule happy.
+  const atBottomRef = useRef(atBottom);
+  useEffect(() => {
+    atBottomRef.current = atBottom;
+  }, [atBottom]);
+
+  // Scroll-to-bottom on session switch. Three compounding races make
+  // a single scrollTop assignment unreliable:
+  //
+  //   1. activateSession async-restores turns from SQLite — the
+  //      restored turns commit in a *later* render than the one
+  //      our useEffect runs after. Our first scrollHeight read
+  //      sees the pre-restore (empty / smaller) layout.
+  //   2. MarkdownView's CodeBlock uses Shiki for syntax highlighting
+  //      asynchronously (WASM + dynamic grammar import). Highlighted
+  //      <pre><code> blocks settle to their final height ~50–500ms
+  //      after first render; line wrapping in the highlighted
+  //      version often differs from the plain fallback.
+  //   3. WKWebView (Tauri on macOS) sometimes skips repainting after
+  //      a rapid DOM swap until an input event nudges it — which is
+  //      exactly the "blank window → scroll a bit → content appears"
+  //      symptom users hit. Assigning scrollTop to the same pixel
+  //      it already was at gets optimized away and doesn't trigger
+  //      paint either.
+  //
+  // Strategy: snap to bottom now (post-commit RAF), then watch the
+  // inner content for height changes via ResizeObserver for a 500ms
+  // window. Every height change inside the window re-snaps — that
+  // catches both the SQLite restore commit and Shiki's
+  // highlight-completion reflow. Each scrollTop write also serves
+  // as a paint trigger for WKWebView.
+  //
+  // Bail out of the observer if the user scrolls away from bottom
+  // during the window — they're reading older content and shouldn't
+  // be yanked back. The existing scroll listener (above) keeps
+  // `atBottom` in sync, mirrored here via atBottomRef.
+  useEffect(() => {
+    if (activeSessionId === undefined) return;
+    const el = scrollContainerRef.current;
+    if (!el) return;
+
+    const rafId = requestAnimationFrame(() => {
+      el.scrollTop = el.scrollHeight;
+      setAtBottom(true);
+    });
+
+    let observer: ResizeObserver | null = null;
+    let timeoutId: number | null = null;
+    const inner = el.firstElementChild;
+    if (inner instanceof HTMLElement) {
+      observer = new ResizeObserver(() => {
+        if (!atBottomRef.current) {
+          observer?.disconnect();
+          observer = null;
+          return;
+        }
+        el.scrollTop = el.scrollHeight;
+      });
+      observer.observe(inner);
+      timeoutId = window.setTimeout(() => {
+        observer?.disconnect();
+        observer = null;
+      }, 500);
+    }
+
+    return () => {
+      cancelAnimationFrame(rafId);
+      observer?.disconnect();
+      if (timeoutId !== null) window.clearTimeout(timeoutId);
+    };
+  }, [activeSessionId]);
 
   // Stick-to-user-message-top scroll behaviour (DESIGN.md §4.3).
   // Effect fires only when the user submits a new message — keying
@@ -333,7 +415,15 @@ export function MainView({
 
           <div className="mt-1.5 flex items-center justify-between text-[11px] text-ink-muted">
             <span>Enter 发送 · Shift+Enter 换行</span>
-            <span>切换 LLM 不会丢失上下文</span>
+            <span>
+              切换{" "}
+              <IconTooltip text="Large Language Model · GPT / Claude / DeepSeek 等大语言模型的统称">
+                <span className="cursor-help underline decoration-line-strong decoration-dotted underline-offset-[3px]">
+                  LLM
+                </span>
+              </IconTooltip>{" "}
+              不会丢失上下文
+            </span>
           </div>
         </div>
       </div>

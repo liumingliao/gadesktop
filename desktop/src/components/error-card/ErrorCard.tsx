@@ -206,7 +206,7 @@ const HINT_CONFIG: Record<AppErrorHint, HintConfig> = {
       },
       {
         id: "details",
-        label: "View raw error",
+        label: "查看技术详情",
         kind: "ghost",
         handler: "toggleDetails",
       },
@@ -216,10 +216,10 @@ const HINT_CONFIG: Record<AppErrorHint, HintConfig> = {
     title: "网络无法连接",
     brief: "请求未能到达 LLM provider，可能是超时或 DNS 问题。",
     actions: [
-      { id: "retry", label: "Retry", kind: "primary", handler: "onRetry" },
+      { id: "retry", label: "重试", kind: "primary", handler: "onRetry" },
       {
         id: "details",
-        label: "View raw error",
+        label: "查看技术详情",
         kind: "ghost",
         handler: "toggleDetails",
       },
@@ -231,13 +231,13 @@ const HINT_CONFIG: Record<AppErrorHint, HintConfig> = {
     actions: [
       {
         id: "switch-llm",
-        label: "Switch LLM",
+        label: "切换 LLM",
         kind: "primary",
         handler: "onSwitchLLM",
       },
       {
         id: "details",
-        label: "View raw error",
+        label: "查看技术详情",
         kind: "ghost",
         handler: "toggleDetails",
       },
@@ -250,7 +250,7 @@ function defaultTitle(error: AppError): string {
     case "runtime":
       return "工具执行失败";
     case "bridge":
-      return "Bridge 错误";
+      return "Workbench 错误";
     case "business":
       return "操作未能完成";
   }
@@ -261,7 +261,7 @@ function defaultActions(error: AppError): ActionDef[] {
   if (error.retryable) {
     actions.push({
       id: "retry",
-      label: "Retry",
+      label: "重试",
       kind: "primary",
       handler: "onRetry",
     });
@@ -269,7 +269,7 @@ function defaultActions(error: AppError): ActionDef[] {
   if (error.traceback || error.context) {
     actions.push({
       id: "details",
-      label: "View details",
+      label: "查看详情",
       kind: "ghost",
       handler: "toggleDetails",
     });

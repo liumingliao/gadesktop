@@ -55,7 +55,7 @@ export function StepAttach({
         Attach 已安装的 GenericAgent
       </h1>
       <p className="mb-7 mt-2.5 font-serif text-[15.5px] italic leading-[1.55] text-ink-soft">
-        指向你本地的 GA 安装目录 · Workbench 会用它启动子进程。
+        指向你本地的 GA 安装目录 · Workbench 会用它启动 GA。
       </p>
 
       <label className="mb-1 block text-[11px] font-semibold uppercase tracking-[0.08em] text-ink-muted">

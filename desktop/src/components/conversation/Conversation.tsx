@@ -77,12 +77,28 @@ function AgentTurnView({
   onApprove?: (approvalId: string, decision: ApprovalDecision) => void;
   projectName?: string;
 }) {
-  // Hide MessageAgent + Copy/Save actions for intermediate turns
-  // that have no user-facing answer. ipc-handlers normalizes empty
-  // cleanedFinalAnswer → null; this trim() check is defense-in-depth
-  // for any other path that might leak a whitespace-only string.
-  const showFinalAnswer =
+  // `finalAnswer` is what's left of GA's responseContent after the
+  // <thinking> / <tool_use> / <file_content> / <summary> tags have
+  // been stripped. The earlier assumption — intermediate turns are
+  // 100% tags so post-strip is always "" — turns out to be false:
+  // GA's LLM frequently emits a one-line narrator ("好的，我先看一下
+  // X") *outside* any tag, before the tool_use block. That narrator
+  // survives the strip and produced bogus Copy/Save chips on every
+  // step that had preamble text.
+  //
+  // Correct rule: GA's loop stops only when the LLM emits no real
+  // tools, so the *final* answer is the turn that contains nothing
+  // but `no_tool` placeholders. (agent_loop.py line 63 synthesizes
+  // a `[{tool_name: 'no_tool', args: {}}]` entry on turns where the
+  // LLM produced no tool_calls — so `tools.length === 0` would
+  // never be true even on the actual final turn. The placeholder is
+  // already visually hidden by ToolCallout's `pickToolTier`.)
+  // Intermediate turns still show their narrator (useful "voice of
+  // GA" running commentary) but without the Copy/Save chips or the
+  // conclusion-rhetoric StrongHr.
+  const hasAnswerText =
     turn.finalAnswer !== null && turn.finalAnswer.trim() !== "";
+  const isFinalTurn = turn.tools.every((t) => t.name === "no_tool");
 
   return (
     <div>
@@ -106,10 +122,12 @@ function AgentTurnView({
         />
       ))}
 
-      {showFinalAnswer && (
+      {hasAnswerText && (
         <>
-          <StrongHr />
-          <MessageAgent>{turn.finalAnswer}</MessageAgent>
+          {isFinalTurn && <StrongHr />}
+          <MessageAgent showActions={isFinalTurn}>
+            {turn.finalAnswer}
+          </MessageAgent>
         </>
       )}
     </div>

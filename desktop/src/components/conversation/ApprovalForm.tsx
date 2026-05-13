@@ -66,13 +66,25 @@ export function ApprovalForm({
         </span>
       </div>
 
-      <div className="mb-3 flex items-start gap-1.5 text-[12.5px] leading-[1.5] text-ink-muted">
+      {/* Two-tier tool description: GA's actual tool name in mono
+          (primary weight) so power users see the precise identifier,
+          paired with a plain-Chinese explanation below for first-time
+          / non-technical users. Preserves precision without crowding
+          the approval moment with English jargon. */}
+      <div className="mb-3 flex items-start gap-1.5">
         <Info
           size={12}
           weight="thin"
-          className="mt-0.5 shrink-0 text-ink-muted"
+          className="mt-1 shrink-0 text-ink-muted"
         />
-        <span>{reason}</span>
+        <div className="min-w-0 flex-1">
+          <div className="font-mono text-[13px] leading-[1.4] text-ink">
+            {tool.name}
+          </div>
+          <div className="mt-0.5 text-[11.5px] leading-[1.5] text-ink-soft">
+            {reason}
+          </div>
+        </div>
       </div>
 
       {/*
@@ -127,15 +139,19 @@ export function ApprovalForm({
 
 // ---------- internals ----------
 
+// Short Chinese descriptions paired with the tool's English mono
+// name in the JSX above (two-tier visual hierarchy — see render
+// site for the layout rationale). Keep these factual and brief;
+// the long-form "审批后 GA 才会执行" boilerplate is implied by
+// the dialog's presence and the Allow / Deny buttons.
 const APPROVAL_REASON: Record<string, string> = {
-  file_patch: "file_patch 会修改文件内容。审批后 GA 才会实际执行 dispatch。",
-  file_write: "file_write 会覆盖或新建文件。审批后 GA 才会实际写盘。",
-  code_run: "code_run 可执行任意代码或 shell 命令，可能触达网络/磁盘。",
-  start_long_term_update:
-    "会修改 GA 的 global memory（持久化）。审批后 GA 才会写入。",
+  file_patch: "修改现有文件的内容",
+  file_write: "写入或覆盖文件",
+  code_run: "执行代码或 shell 命令",
+  start_long_term_update: "更新 GA 的长期记忆（持久化）",
 };
 
-const GENERIC_REASON = "该工具在默认审批列表里，需要你确认后才能执行。";
+const GENERIC_REASON = "默认审批列表里的工具，需要你确认后才能执行";
 
 const HIGH_SENSITIVITY_TOOLS = new Set(["start_long_term_update"]);
 

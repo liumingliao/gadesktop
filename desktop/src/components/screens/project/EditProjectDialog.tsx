@@ -164,7 +164,7 @@ export function EditProjectDialog({
 
             <Field
               label="项目文件夹"
-              hint="改 rootPath 后，该 project 下 session 下次启动才会用新目录（已运行的 bridge 不受影响）"
+              hint="修改后已有对话需重启 Workbench 后生效"
             >
               <div className="flex gap-2">
                 <input

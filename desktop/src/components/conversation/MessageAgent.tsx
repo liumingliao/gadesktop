@@ -13,17 +13,31 @@ import { MessageActions } from "@/components/conversation/MessageActions";
  * passes through unchanged so demo fixtures and tests can still
  * inject hand-built content.
  *
- * Message actions (Copy / Save): rendered below the markdown when
- * we have a string source (i.e. a real LLM reply). ReactNode demo
- * children skip them — there's no canonical markdown source to copy
- * back out, and demos rarely need actions.
+ * Message actions (Copy / Save): only the **final** turn of a GA
+ * loop run carries them — the conclusion is what users want to grab.
+ * Intermediate-step narrator text ("好的，我先看一下 X" before a
+ * tool_use) still renders through MessageAgent so the user can see
+ * GA's running commentary, but with `showActions={false}` so the
+ * action chips don't suggest those mid-step lines are copyable
+ * deliverables. Conversation.AgentTurnView passes
+ * `tools.length === 0` (GA stops looping when no tool is dispatched,
+ * so that's the definition of "final turn").
+ *
+ * ReactNode demo children always skip actions — there's no canonical
+ * markdown source to copy back out, and demos rarely need actions.
  */
-export function MessageAgent({ children }: { children: ReactNode }) {
+export function MessageAgent({
+  children,
+  showActions = true,
+}: {
+  children: ReactNode;
+  showActions?: boolean;
+}) {
   if (typeof children === "string") {
     return (
       <div>
         <MarkdownView source={children} variant="agent" />
-        <MessageActions source={children} />
+        {showActions && <MessageActions source={children} />}
       </div>
     );
   }

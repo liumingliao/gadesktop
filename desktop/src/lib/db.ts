@@ -58,6 +58,33 @@ export async function loadSessions(): Promise<Session[]> {
   return rows.map(sessionFromRow);
 }
 
+/**
+ * SessionStatus is a tagged union of two categories:
+ *
+ *   Durable  : archived / completed / cancelled
+ *     User/system decisions that should persist across app restarts.
+ *
+ *   Transient: idle / connecting / running / waiting_approval / error
+ *     Pure runtime projections from `_runtimes[id]` via
+ *     `deriveSessionStatus`. Meaningless once the process exits.
+ *
+ * Persisting a transient status would create stale "正在工作…" /
+ * "error" sidebar rows on cold start — there's no runtime to back
+ * them up. We coerce all transients to "idle" both on write (so
+ * SQLite never holds a misleading value) and on read (so any
+ * already-stale rows from earlier code paths heal on next load
+ * without a migration).
+ */
+const DURABLE_SESSION_STATUSES = new Set<SessionStatus>([
+  "archived",
+  "completed",
+  "cancelled",
+]);
+
+function persistableStatus(s: SessionStatus): SessionStatus {
+  return DURABLE_SESSION_STATUSES.has(s) ? s : "idle";
+}
+
 export async function persistSession(s: Session): Promise<void> {
   const db = await getDB();
   await db.execute(
@@ -93,7 +120,7 @@ export async function persistSession(s: Session): Promise<void> {
       s.id,
       s.projectId ?? null,
       s.title,
-      s.status,
+      persistableStatus(s.status),
       s.summary ?? null,
       s.turnCount ?? 0,
       s.currentTool ?? null,
@@ -225,7 +252,11 @@ function sessionFromRow(r: SessionRow): Session {
     id: r.id,
     projectId: r.project_id ?? undefined,
     title: r.title,
-    status: r.status as SessionStatus,
+    // Heal stale transient status from older SQLite rows (a row
+    // persisted with status="running" mid-loop has no runtime to back
+    // it up after restart). persistSession already coerces on write,
+    // but this load-side guard fixes data that pre-dates that fix.
+    status: persistableStatus(r.status as SessionStatus),
     summary: r.summary ?? undefined,
     turnCount: r.turn_count,
     currentTool: r.current_tool ?? undefined,
