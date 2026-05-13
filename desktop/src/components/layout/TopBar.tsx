@@ -4,11 +4,13 @@ import {
   ArrowsClockwise,
   ArrowsInLineHorizontal,
   ArrowsOutLineHorizontal,
+  CaretDown,
   Cat,
-  DotsThree,
   Gear,
   Lightning,
+  PencilSimple,
 } from "@phosphor-icons/react";
+import { useEffect, useRef, useState } from "react";
 
 import { cn } from "@/lib/utils";
 
@@ -55,6 +57,13 @@ export interface TopBarProps {
   onReinjectTools?: () => void;
   onTogglePet?: () => void;
   petAttachedSessionId?: string | null;
+  /**
+   * Rename the active session. When provided, the title menu shows a
+   * "重命名" entry that flips the title block into an inline input —
+   * mirrors the right-click rename in Sidebar so users have two
+   * equally-discoverable rename paths.
+   */
+  onRenameSession?: (newTitle: string) => void;
   /**
    * Padding on the left to clear the macOS traffic light (which is
    * positioned at {16, 16} via tauri.conf.json titleBarStyle "Overlay").
@@ -110,6 +119,7 @@ export function TopBar({
   onReinjectTools,
   onTogglePet,
   petAttachedSessionId,
+  onRenameSession,
   trafficLightPadding = 70,
 }: TopBarProps) {
   return (
@@ -124,27 +134,39 @@ export function TopBar({
         style={{ width: trafficLightPadding }}
       />
 
-      {/* Center: title + session-level actions, centered together.
-          `⋯` lives next to the title (not the right cluster) because
-          it's session-scoped (Reinject Tools / Desktop Pet operate
-          on the active session), and the right cluster holds global
-          chrome (YOLO / width toggle / Settings). Visually grouping
-          session-action with session-identity preserves macOS-style
-          center-title chrome while making the scope hierarchy
-          legible. `⋯` is hidden entirely when no session is active
-          — same "affordance only when usable" rule we use elsewhere
-          (ApprovalDock / Composer Stop / AskUserBubble). */}
+      {/* Center: title-as-dropdown trigger. The title text + caret
+          form a single button that opens session-scoped actions
+          (Reinject Tools / Desktop Pet, plus Rename when V0.1 #3
+          lands). Notion / Linear / Arc convention — clicking the
+          document name opens its menu.
+
+          History: previously a bare title `<span>` with a separate
+          `⋯` button next to it. Visually the trailing dots read as
+          CSS text-overflow ellipsis, not as an affordance — users
+          didn't realize it was a menu. Folding the menu into the
+          title makes "this is interactive" unambiguous (caret +
+          hover fill) and gives a future home for inline rename.
+
+          Empty state ("新对话" placeholder): non-interactive, draggable
+          span. Same "affordance only when usable" rule applied
+          elsewhere (ApprovalDock / Composer Stop / AskUserBubble).
+
+          Drag region: the wrapping div is draggable so the empty
+          spaces left/right of the title still drag the window. The
+          button itself is auto-excluded by Tauri (buttons don't
+          trigger drag), so clicks open the menu instead of dragging. */}
       <div
         data-tauri-drag-region
-        className="flex min-w-0 flex-1 items-center justify-center gap-2 px-3"
+        className="flex min-w-0 flex-1 items-center justify-center px-3"
       >
         {sessionTitle ? (
-          <span
-            data-tauri-drag-region
-            className="truncate font-medium text-ink"
-          >
-            {sessionTitle}
-          </span>
+          <SessionTitleMenu
+            title={sessionTitle}
+            onReinjectTools={onReinjectTools}
+            onTogglePet={onTogglePet}
+            petAttachedSessionId={petAttachedSessionId}
+            onRename={onRenameSession}
+          />
         ) : (
           <span
             data-tauri-drag-region
@@ -152,13 +174,6 @@ export function TopBar({
           >
             新对话
           </span>
-        )}
-        {sessionTitle && (
-          <SessionActionsMenu
-            onReinjectTools={onReinjectTools}
-            onTogglePet={onTogglePet}
-            petAttachedSessionId={petAttachedSessionId}
-          />
         )}
       </div>
 
@@ -274,9 +289,10 @@ function YoloIndicator({
 }
 
 /**
- * `⋯` overflow menu for session-level actions. Holds the rare /
- * power-user features that don't deserve always-visible TopBar chrome
- * but ARE conceptually attached to "this current session":
+ * Title-as-dropdown trigger for session-scoped actions. The session
+ * title text and a caret form a single button; clicking opens a menu
+ * with low-frequency / power-user actions attached to "this current
+ * session":
  *
  *   - 🔄 重新注入工具 (Reinject Tools): one-shot — re-injects GA's
  *     tool definitions into the active session's LLM history.
@@ -284,35 +300,83 @@ function YoloIndicator({
  *     turn-end progress to it. The label flips to "已附着" suffix
  *     when running.
  *
- * Future V0.2 entries (`/branch`, `/rewind` etc.) slot in here too —
- * see discussion thread 2026-05-13.
+ * Future V0.2 entries (`/branch`, `/rewind`, inline rename) slot in
+ * here too — see discussion thread 2026-05-13.
+ *
+ * Why title-as-trigger instead of a sibling `⋯` button: a bare title +
+ * trailing dots reads as CSS text-overflow ellipsis. The whole-block
+ * trigger removes that ambiguity and gives the rename affordance a
+ * natural home (V0.1 #3).
  */
-function SessionActionsMenu({
+function SessionTitleMenu({
+  title,
   onReinjectTools,
   onTogglePet,
   petAttachedSessionId,
+  onRename,
 }: {
+  title: string;
   onReinjectTools?: () => void;
   onTogglePet?: () => void;
   petAttachedSessionId?: string | null;
+  onRename?: (newTitle: string) => void;
 }) {
   const petRunning = !!petAttachedSessionId;
+  const [editing, setEditing] = useState(false);
+
+  // Tracks whether the menu close was triggered by "重命名" so we can
+  // suppress Radix's default focus-return-to-trigger (the trigger is
+  // about to be replaced by the input). Without this, Radix focuses
+  // the about-to-unmount button and the input never wins focus on
+  // mount — user has to click again.
+  const renameRequestedRef = useRef(false);
+
+  if (editing && onRename) {
+    return (
+      <SessionTitleEditor
+        initial={title}
+        onCommit={(next) => {
+          onRename(next);
+          setEditing(false);
+        }}
+        onCancel={() => setEditing(false)}
+      />
+    );
+  }
+
   return (
     <DropdownMenu.Root>
       <DropdownMenu.Trigger asChild>
         <button
           type="button"
-          title="更多 session 操作"
-          aria-label="更多 session 操作"
-          className="flex size-7 items-center justify-center rounded-sm text-ink-soft transition-colors hover:bg-hover hover:text-ink"
+          aria-label={`${title} · 更多对话操作`}
+          className={cn(
+            "group inline-flex min-w-0 max-w-full cursor-pointer items-center gap-1.5 rounded-md px-2 py-1",
+            "transition-colors hover:bg-hover data-[state=open]:bg-hover",
+          )}
         >
-          <DotsThree size={18} weight="bold" />
+          <span className="truncate font-medium text-ink">{title}</span>
+          <CaretDown
+            size={11}
+            weight="bold"
+            className={cn(
+              "shrink-0 text-ink-muted transition-transform",
+              "group-hover:text-ink-soft",
+              "group-data-[state=open]:rotate-180 group-data-[state=open]:text-ink-soft",
+            )}
+          />
         </button>
       </DropdownMenu.Trigger>
       <DropdownMenu.Portal>
         <DropdownMenu.Content
-          align="end"
+          align="center"
           sideOffset={6}
+          onCloseAutoFocus={(e) => {
+            if (renameRequestedRef.current) {
+              renameRequestedRef.current = false;
+              e.preventDefault();
+            }
+          }}
           className={cn(
             // z-[70] is above the dev-toggle panel (z-[60] in
             // App.tsx) — without this, the menu opens BEHIND the
@@ -323,6 +387,24 @@ function SessionActionsMenu({
             "text-[13px] text-ink shadow-elevated",
           )}
         >
+          {onRename && (
+            <>
+              <DropdownMenu.Item
+                onSelect={() => {
+                  renameRequestedRef.current = true;
+                  setEditing(true);
+                }}
+                className={cn(
+                  "flex cursor-pointer items-center gap-2 rounded-sm px-2 py-1.5 outline-none",
+                  "data-[highlighted]:bg-hover",
+                )}
+              >
+                <PencilSimple size={14} weight="thin" className="text-ink-soft" />
+                <span>重命名</span>
+              </DropdownMenu.Item>
+              <DropdownMenu.Separator className="my-1 h-px bg-line" />
+            </>
+          )}
           <DropdownMenu.Item
             onSelect={() => onReinjectTools?.()}
             className={cn(
@@ -346,7 +428,7 @@ function SessionActionsMenu({
               className={petRunning ? "text-brand" : "text-ink-soft"}
             />
             <span className={petRunning ? "text-ink" : "text-ink"}>
-              Desktop Pet
+              桌面宠物
             </span>
             {petRunning && (
               <span className="ml-auto text-[11px] text-ink-muted">
@@ -357,6 +439,75 @@ function SessionActionsMenu({
         </DropdownMenu.Content>
       </DropdownMenu.Portal>
     </DropdownMenu.Root>
+  );
+}
+
+/**
+ * Inline title editor — appears when the user picks "重命名" from the
+ * title menu. Mirrors the Sidebar inline-edit pattern:
+ *
+ *   - autofocus + select-all on mount
+ *   - Enter commits, Escape cancels, blur commits ("click outside
+ *     doesn't lose work" — matches Sidebar)
+ *   - settledRef guards against the Enter-then-blur double-fire
+ *
+ * Tauri-specific: the wrapping TopBar div is `data-tauri-drag-region`,
+ * which captures mousedown for window dragging. Per-element opt-out
+ * via `data-tauri-drag-region="false"` lets the input receive
+ * mousedown / focus normally — without this, clicking the input drags
+ * the window instead of moving the cursor.
+ */
+function SessionTitleEditor({
+  initial,
+  onCommit,
+  onCancel,
+}: {
+  initial: string;
+  onCommit: (newTitle: string) => void;
+  onCancel: () => void;
+}) {
+  const ref = useRef<HTMLInputElement>(null);
+  const [value, setValue] = useState(initial);
+  const settledRef = useRef(false);
+
+  useEffect(() => {
+    ref.current?.focus();
+    ref.current?.select();
+  }, []);
+
+  const commit = () => {
+    if (settledRef.current) return;
+    settledRef.current = true;
+    onCommit(value);
+  };
+  const cancel = () => {
+    if (settledRef.current) return;
+    settledRef.current = true;
+    onCancel();
+  };
+
+  return (
+    <input
+      ref={ref}
+      type="text"
+      value={value}
+      data-tauri-drag-region="false"
+      onChange={(e) => setValue(e.target.value)}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          commit();
+        } else if (e.key === "Escape") {
+          e.preventDefault();
+          cancel();
+        }
+      }}
+      onBlur={commit}
+      className={cn(
+        "w-full max-w-[480px] min-w-0 rounded-md bg-app px-2 py-1 text-[13px] font-medium text-ink",
+        "border border-line outline-none ring-2 ring-brand/30 focus:border-brand",
+      )}
+    />
   );
 }
 

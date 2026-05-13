@@ -363,8 +363,8 @@ function SidebarQuickActions({
   activeProjectName?: string;
 }) {
   const newChatLabel = activeProjectName
-    ? `New Chat in 📂 ${activeProjectName}`
-    : "New Chat";
+    ? `新对话 · 📂 ${activeProjectName}`
+    : "新对话";
   return (
     <div className="border-b border-line py-1.5">
       <QuickAction
@@ -375,7 +375,7 @@ function SidebarQuickActions({
       />
       <QuickAction
         icon={<MagnifyingGlass size={14} weight="thin" />}
-        label="Search"
+        label="搜索"
         hint="⌘K"
         onClick={onSearch}
       />
@@ -708,12 +708,12 @@ function SidebarSessionRow({
               {session.pinned ? (
                 <>
                   <PushPinSlash size={13} weight="thin" />
-                  Unpin
+                  取消置顶
                 </>
               ) : (
                 <>
                   <PushPin size={13} weight="thin" />
-                  Pin
+                  置顶
                 </>
               )}
             </ContextMenu.Item>
@@ -727,7 +727,7 @@ function SidebarSessionRow({
                 )}
               >
                 <Folder size={13} weight="thin" />
-                Move to project
+                归入项目
                 <CaretRight
                   size={10}
                   weight="thin"
@@ -743,7 +743,7 @@ function SidebarSessionRow({
                 >
                   {sortedProjects.length === 0 ? (
                     <div className="px-2.5 py-1.5 text-[12px] italic text-ink-muted">
-                      还没有 project
+                      还没有项目
                     </div>
                   ) : (
                     sortedProjects.map((p) => {
@@ -781,7 +781,7 @@ function SidebarSessionRow({
                         className={itemClass}
                       >
                         <XIcon size={13} weight="thin" />
-                        Remove from project
+                        从项目移除
                       </ContextMenu.Item>
                     </>
                   )}
@@ -792,7 +792,7 @@ function SidebarSessionRow({
           {onArchive && (
             <ContextMenu.Item onSelect={onArchive} className={itemClass}>
               <Archive size={13} weight="thin" />
-              Archive
+              归档
             </ContextMenu.Item>
           )}
         </ContextMenu.Content>
@@ -965,7 +965,7 @@ function SidebarProjectsSection({
           className="mx-1.5 mb-1 flex w-[calc(100%-12px)] cursor-pointer items-start rounded-sm px-3 py-2 text-left transition-colors hover:bg-hover"
         >
           <span className="font-serif text-[11.5px] italic text-ink-muted group-hover:text-ink-soft">
-            把相关 session 归到 project 里
+            把相关对话归入项目
           </span>
         </button>
       ) : (
@@ -1104,12 +1104,12 @@ function SidebarProjectRow({
               {project.pinned ? (
                 <>
                   <PushPinSlash size={13} weight="thin" />
-                  Unpin
+                  取消置顶
                 </>
               ) : (
                 <>
                   <PushPin size={13} weight="thin" />
-                  Pin
+                  置顶
                 </>
               )}
             </ContextMenu.Item>
@@ -1117,7 +1117,7 @@ function SidebarProjectRow({
           {onEdit && (
             <ContextMenu.Item onSelect={onEdit} className={itemClass}>
               <FolderOpen size={13} weight="thin" />
-              Edit project
+              编辑项目
             </ContextMenu.Item>
           )}
           {onDelete && (
@@ -1128,7 +1128,7 @@ function SidebarProjectRow({
                 className={destructiveItemClass}
               >
                 <Trash size={13} weight="thin" />
-                Delete project
+                删除项目
               </ContextMenu.Item>
             </>
           )}

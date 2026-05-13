@@ -369,6 +369,10 @@ function App() {
               });
             }}
             petAttachedSessionId={petAttachedSessionId}
+            onRenameSession={(newTitle) => {
+              if (!activeSessionId) return;
+              renameSession(activeSessionId, newTitle);
+            }}
             onOpenSettings={() => setSettingsOpen(true)}
           />
         }

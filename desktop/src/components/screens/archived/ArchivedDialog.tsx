@@ -303,7 +303,7 @@ function Header({
           </>
         )}
         <Dialog.Close
-          aria-label="Close"
+          aria-label="关闭"
           onClick={onClose}
           className="inline-flex size-7 items-center justify-center rounded-sm text-ink-soft transition-colors hover:bg-hover hover:text-ink"
         >

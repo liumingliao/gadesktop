@@ -22,9 +22,9 @@ export function StepWelcome({ onStart }: StepWelcomeProps) {
       </p>
 
       <ul className="m-0 space-y-2.5 p-0 text-[13.5px] text-ink">
-        <Feature>多 session 并行运行</Feature>
+        <Feature>多对话并行运行</Feature>
         <Feature>对高风险工具调用做审批</Feature>
-        <Feature>查看与恢复历史会话</Feature>
+        <Feature>查看与恢复历史对话</Feature>
       </ul>
 
       <button

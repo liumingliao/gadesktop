@@ -100,7 +100,7 @@ const NOW_ISO = new Date().toISOString();
 export const DEMO_SESSIONS: Session[] = [
   {
     id: "s-today-1",
-    title: "Workbench 桌面端 SQLite schema",
+    title: "Galley 桌面端 SQLite schema",
     status: "waiting_approval",
     summary: "Turn 12 · 等待 file_patch 审批",
     pendingApprovalCount: 1,

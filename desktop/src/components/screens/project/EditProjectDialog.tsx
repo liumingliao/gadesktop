@@ -132,10 +132,10 @@ export function EditProjectDialog({
         >
           <div className="flex items-center justify-between">
             <Dialog.Title className="font-serif text-[16px] font-medium text-ink">
-              Edit Project
+              编辑项目
             </Dialog.Title>
             <Dialog.Close
-              aria-label="Close"
+              aria-label="关闭"
               className="inline-flex size-7 items-center justify-center rounded-sm text-ink-soft transition-colors hover:bg-hover hover:text-ink"
             >
               <XIcon size={14} weight="thin" />
@@ -164,7 +164,7 @@ export function EditProjectDialog({
 
             <Field
               label="项目文件夹"
-              hint="修改后已有对话需重启 Workbench 生效"
+              hint="修改后已有对话需重启 Galley 生效"
             >
               <div className="flex gap-2">
                 <input
@@ -223,10 +223,10 @@ export function EditProjectDialog({
               )}
             >
               <Trash size={12} weight="thin" />
-              删除 Project
+              删除项目
             </button>
             <span className="ml-2 text-[11px] text-ink-muted">
-              里面的 session 不会被删除，自动解绑回 timeline
+              里面的对话不会被删除，自动解绑回时间线
             </span>
           </div>
         </Dialog.Content>
@@ -273,14 +273,14 @@ export function ConfirmDeleteProjectDialog({
           <div className="flex items-center gap-2">
             <WarningCircle size={18} weight="bold" className="text-error" />
             <Dialog.Title className="font-serif text-[15px] font-medium text-ink">
-              删除 Project「{project?.name ?? ""}」？
+              删除项目「{project?.name ?? ""}」？
             </Dialog.Title>
           </div>
           <p
             id="confirm-delete-project-desc"
             className="mt-2 text-[12.5px] leading-[1.55] text-ink-soft"
           >
-            该 Project 下的 sessions 不会被删除，会自动解绑回 timeline。
+            该项目下的对话不会被删除，会自动解绑回时间线。
             <span className="text-ink">此操作无法撤销。</span>
           </p>
 

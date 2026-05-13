@@ -102,14 +102,14 @@ export function ApprovalForm({
             icon={<Check size={13} weight="bold" />}
             onClick={() => onApprove?.("allow_once")}
           >
-            Allow once
+            允许
           </DecisionButton>
           <DecisionButton
             variant="danger-ghost"
             icon={<X size={13} weight="bold" />}
             onClick={() => onApprove?.("deny")}
           >
-            Deny
+            拒绝
           </DecisionButton>
           {projectName && (
             <DecisionButton
@@ -117,7 +117,7 @@ export function ApprovalForm({
               icon={<FolderSimple size={13} weight="thin" />}
               onClick={() => onApprove?.("always_allow_project")}
             >
-              Always allow in {projectName}
+              加入「{projectName}」白名单
             </DecisionButton>
           )}
           <DecisionButton
@@ -127,7 +127,7 @@ export function ApprovalForm({
             disabled={globalDisabled}
             title={globalDisabled ? "高敏感工具不允许全局自动通过" : undefined}
           >
-            Always allow globally
+            加入全局白名单
           </DecisionButton>
         </div>
       ) : (
@@ -243,9 +243,9 @@ function DecisionPill({ decision }: { decision: ApprovalDecision }) {
   const isDeny = decision === "deny";
   const Icon = isDeny ? Prohibit : CheckCircle;
   const label: Record<ApprovalDecision, string> = {
-    allow_once: "Allowed · 已通过本次执行",
-    deny: "Denied · agent 将收到拒绝信号",
-    always_allow_project: "已加入此 Project 白名单",
+    allow_once: "已通过 · 本次执行",
+    deny: "已拒绝 · 已通知 AI",
+    always_allow_project: "已加入此项目白名单",
     always_allow_global: "已加入全局白名单",
   };
   return (

@@ -97,13 +97,13 @@ export function Settings({
             "max-h-[calc(100vh-32px)] max-w-[calc(100vw-32px)]",
           )}
         >
-          <Dialog.Title className="sr-only">Settings</Dialog.Title>
+          <Dialog.Title className="sr-only">设置</Dialog.Title>
 
           <SettingsTabList tab={tab} onChange={setTab} />
 
           <div className="relative min-w-0 flex-1 overflow-y-auto bg-app">
             <Dialog.Close
-              aria-label="Close"
+              aria-label="关闭"
               className="absolute right-3 top-3 z-10 inline-flex size-7 items-center justify-center rounded-sm text-ink-soft transition-colors hover:bg-hover hover:text-ink"
             >
               <XIcon size={14} weight="thin" />

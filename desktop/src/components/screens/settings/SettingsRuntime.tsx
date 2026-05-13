@@ -39,7 +39,7 @@ export function SettingsRuntime({
     <div className="space-y-7">
       <SectionTitle
         title="Runtime"
-        subtitle="GA 的启动参数 · 改动后需要重启 Workbench"
+        subtitle="GenericAgent 的启动参数 · 改动后需要重启 Galley"
       />
 
       <PathField label="GA Path" value={info.gaPath} onPick={onChangeGAPath} />
@@ -54,7 +54,7 @@ export function SettingsRuntime({
         // edit src-tauri/capabilities/default.json.
         onPick={onChangeBridgePython}
         readOnly
-        hint="使用系统默认的 python3 · 自定义路径需手动编辑 Workbench 配置文件"
+        hint="使用系统默认的 python3 · 自定义路径需手动编辑 Galley 配置文件"
       />
 
       <GAVersionCard
@@ -83,7 +83,7 @@ export function SettingsRuntime({
       </div>
 
       <div className="border-t border-line pt-4 font-mono text-[11px] text-ink-muted">
-        Workbench v{info.workbenchVersion}
+        Galley v{info.workbenchVersion}
       </div>
     </div>
   );
@@ -122,7 +122,7 @@ function GAVersionCard({
 
   return (
     <div>
-      <SubLabel>GA Version</SubLabel>
+      <SubLabel>GenericAgent 版本</SubLabel>
       <div className="mt-2 rounded-sm border border-line bg-surface px-3 py-2.5">
         <div className="flex items-center gap-2 font-mono text-[12.5px] text-ink">
           <span className="text-ink-muted">当前版本</span>

@@ -136,7 +136,7 @@ export function CommandPalette(props: CommandPaletteProps) {
           value={search}
           onValueChange={setSearch}
           placeholder={
-            page === "switch-llm" ? "搜索 LLM…" : "搜索 session 或输入命令…"
+            page === "switch-llm" ? "搜索 LLM…" : "搜索对话或输入命令…"
           }
           autoFocus
         />
@@ -240,14 +240,14 @@ function RootPage({
       </Command.Empty>
 
       {/* Always-first: New chat. Plain Item, no group header. */}
-      <Command.Item value="new-chat new chat 新建对话" onSelect={onNewChat}>
-        <PaletteRow Icon={Plus} label="New Chat" shortcut="⌘N" />
+      <Command.Item value="new-chat new chat 新对话 新建对话" onSelect={onNewChat}>
+        <PaletteRow Icon={Plus} label="新对话" shortcut="⌘N" />
       </Command.Item>
       <Command.Item
-        value="new-project new project 新建 project 项目"
+        value="new-project new project 新建项目"
         onSelect={onNewProject}
       >
-        <PaletteRow Icon={FolderOpen} label="New Project" />
+        <PaletteRow Icon={FolderOpen} label="新建项目" />
       </Command.Item>
 
       {/* Sessions */}

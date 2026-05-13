@@ -37,7 +37,7 @@ export function SettingsAbout({
           Galley
         </h2>
         <p className="mt-1 font-serif text-[14px] italic text-ink-soft">
-          多 session AI agent 的本地桌面工作台。
+          多对话 AI agent 的本地桌面工作台。
         </p>
       </div>
 
@@ -94,13 +94,13 @@ export function SettingsAbout({
       <div className="mt-10">
         <SubLabel>Links</SubLabel>
         <div className="mt-3 space-y-1.5">
-          <ExternalLink href="https://github.com/wangjc683/genericagent-workbench">
-            Galley · github.com/wangjc683/genericagent-workbench
+          <ExternalLink href="https://github.com/wangjc683/galley">
+            Galley · github.com/wangjc683/galley
           </ExternalLink>
           <ExternalLink href="https://github.com/lsdefine/GenericAgent">
             GenericAgent · github.com/lsdefine/GenericAgent
           </ExternalLink>
-          <ExternalLink href="https://github.com/wangjc683/genericagent-workbench/issues">
+          <ExternalLink href="https://github.com/wangjc683/galley/issues">
             反馈建议 · GitHub Issues
           </ExternalLink>
         </div>

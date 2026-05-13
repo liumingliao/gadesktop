@@ -168,7 +168,7 @@ GA baseline 锁死一个 commit，但需要定期升级 —— 否则用户 `git
 ## 目录结构
 
 ```
-genericagent-workbench/
+galley/
 ├── README.md                # 项目门面
 ├── LICENSE                  # MIT
 ├── CLAUDE.md                # 本文件，AI agent 协作规范

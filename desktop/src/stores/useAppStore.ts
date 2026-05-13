@@ -1935,7 +1935,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
           category: "business",
           severity: "info",
           title: "已保存路径配置",
-          message: "重启 Workbench 才能让现有 session 生效",
+          message: "重启 Galley 才能让现有对话生效",
           hint: null,
           retryable: false,
           context: "setGAConfig",

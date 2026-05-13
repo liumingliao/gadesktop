@@ -201,8 +201,8 @@ function Header({
       ? "无匹配"
       : `${shown} / ${total} 命中`
     : total > 0
-      ? `${total} 个 project`
-      : "暂无 project";
+      ? `${total} 个项目`
+      : "暂无项目";
 
   return (
     <div className="flex items-center gap-3 border-b border-line bg-elevated px-5 py-3.5">
@@ -224,7 +224,7 @@ function Header({
           New
         </button>
         <Dialog.Close
-          aria-label="Close"
+          aria-label="关闭"
           onClick={onClose}
           className="inline-flex size-7 items-center justify-center rounded-sm text-ink-soft transition-colors hover:bg-hover hover:text-ink"
         >
@@ -300,8 +300,8 @@ function ProjectRow({
           </span>
           {hasActive && (
             <span
-              aria-label="有活跃 session"
-              title="有 session 正在运行或等待审批"
+              aria-label="有活跃对话"
+              title="有对话正在运行或等待审批"
               className="size-1.5 shrink-0 rounded-full bg-brand"
             />
           )}
@@ -321,8 +321,8 @@ function ProjectRow({
         )}
         <div className="mt-1 text-[10.5px] text-ink-muted">
           {sessionCount === 0
-            ? "暂无 session"
-            : `${sessionCount} 个 session`}
+            ? "暂无对话"
+            : `${sessionCount} 个对话`}
         </div>
       </div>
     </li>
@@ -381,7 +381,7 @@ function EmptyState({ filtered }: { filtered: boolean }) {
   return (
     <div className="flex h-full items-center justify-center">
       <p className="font-serif text-[13.5px] italic text-ink-muted">
-        {filtered ? "没有匹配的 project。" : "还没有 project。"}
+        {filtered ? "没有匹配的项目。" : "还没有项目。"}
       </p>
     </div>
   );

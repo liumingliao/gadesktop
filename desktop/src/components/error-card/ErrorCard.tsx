@@ -250,7 +250,7 @@ function defaultTitle(error: AppError): string {
     case "runtime":
       return "工具执行失败";
     case "bridge":
-      return "Workbench 错误";
+      return "Galley 错误";
     case "business":
       return "操作未能完成";
   }

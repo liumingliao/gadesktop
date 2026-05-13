@@ -140,7 +140,7 @@ export function SettingsApproval({
             <RuleList
               rules={config.alwaysAllowProject}
               onRemove={(tool) => onRemoveAlwaysAllow?.("project", tool)}
-              empty="没有 project 级白名单"
+              empty="没有项目级白名单"
             />
           </div>
         )}
@@ -357,7 +357,7 @@ const TOOL_DESCRIPTIONS: Record<string, string> = {
   code_run: "执行 shell / python / powershell",
   file_write: "覆盖或新建文件",
   file_patch: "修改已有文件",
-  start_long_term_update: "写入 GA global memory",
+  start_long_term_update: "写入 GenericAgent 长期记忆",
 };
 
 function SectionTitle({

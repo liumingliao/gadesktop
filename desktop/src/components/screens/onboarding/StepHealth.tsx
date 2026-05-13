@@ -45,7 +45,7 @@ export function StepHealth({
         检查 GA 运行环境
       </h1>
       <p className="mb-7 mt-2.5 font-serif text-[15.5px] italic leading-[1.55] text-ink-soft">
-        全部通过后才能进入主界面 · Workbench 不会修改你的 GA。
+        全部通过后才能进入主界面 · Galley 不会修改你的 GA。
       </p>
 
       <HealthCheckCard
@@ -85,7 +85,7 @@ export function StepHealth({
             "disabled:cursor-not-allowed disabled:opacity-40",
           )}
         >
-          进入 Workbench
+          进入 Galley
           <ArrowRight size={13} weight="bold" />
         </button>
       </div>

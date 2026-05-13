@@ -412,7 +412,7 @@ function LLMPill({
               purpose — supplementary metadata, not a CTA. */}
           <div className="mt-1 border-t border-line/60 px-2.5 pb-1 pt-1.5 text-[10.5px] leading-[1.45] text-ink-muted/70">
             修改 <code className="font-mono">mykey.py</code> 后重启
-            Workbench 生效
+            Galley 生效
           </div>
         </Popover.Content>
       </Popover.Portal>

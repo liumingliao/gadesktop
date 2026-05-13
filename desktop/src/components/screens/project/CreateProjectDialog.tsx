@@ -106,10 +106,10 @@ export function CreateProjectDialog({
         >
           <div className="flex items-center justify-between">
             <Dialog.Title className="font-serif text-[16px] font-medium text-ink">
-              New Project
+              新建项目
             </Dialog.Title>
             <Dialog.Close
-              aria-label="Close"
+              aria-label="关闭"
               className="inline-flex size-7 items-center justify-center rounded-sm text-ink-soft transition-colors hover:bg-hover hover:text-ink"
             >
               <XIcon size={14} weight="thin" />
