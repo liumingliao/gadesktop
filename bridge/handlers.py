@@ -181,11 +181,19 @@ class WorkbenchHandler(GenericAgentHandler):  # type: ignore[misc]  # GA has no 
         args: dict[str, Any],
         response: Any,
         index: int = 0,
+        tool_num: int = 1,
     ) -> Generator[Any, None, Any]:
+        # `tool_num` was added by upstream GA in commit 3205f4a (baseline
+        # cf65515 → 6bb3104 upgrade): the count of parallel tool calls in
+        # this turn, used by GenericAgentHandler's tool implementations
+        # to scale down per-tool output length so the combined response
+        # doesn't blow past the LLM context. We don't read it ourselves
+        # but must forward it unchanged so the underlying do_* methods
+        # see the same `_tool_num` arg they expect.
         if self.needs_approval(tool_name):
-            # Defensive copy: super().dispatch mutates args (adds _index).
-            # Approval Cards in the desktop UI must show the user-facing args,
-            # not GA's internal bookkeeping state.
+            # Defensive copy: super().dispatch mutates args (adds _index,
+            # _tool_num). Approval Cards in the desktop UI must show the
+            # user-facing args, not GA's internal bookkeeping state.
             decision = self._request_approval(tool_name, dict(args))
             if decision == "deny":
                 yield f"[Approval] User denied: {tool_name}\n"
@@ -205,4 +213,8 @@ class WorkbenchHandler(GenericAgentHandler):  # type: ignore[misc]  # GA has no 
                     {"status": "denied", "msg": f"Unknown approval decision: {decision}"},
                     next_prompt="\n",
                 )
-        return (yield from super().dispatch(tool_name, args, response, index))
+        return (
+            yield from super().dispatch(
+                tool_name, args, response, index, tool_num
+            )
+        )

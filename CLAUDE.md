@@ -29,22 +29,86 @@ GA 升级时，Workbench 只依赖 `BaseHandler` / `ToolClient` 这一层公开 
 
 ## GA Baseline
 
-锁定 commit: `cf6551516fcc836f21dcdad592b07c703d09e1d8`（upstream/main HEAD，2026-05-12）
+锁定 commit: `6bb31046cc29981f3fd0ce0b22a6af8c9741e850`（upstream/main HEAD，2026-05-13）
 
 - 来源：`lsdefine/GenericAgent` upstream main 分支
-- 92 个 commits 升级自旧 baseline `6a3eecc`（2026-04-29），接口表面经逐项审计**零 breaking change**：
-  - `agent_loop.py` 全文 byte-identical（BaseHandler 三回调 + dispatch 生成器无变化）
+- **5 个 commits** 升级自旧 baseline `cf65515`（2026-05-12），其中 1 处接口表面变化已在桥接层适配（详见 [2026-05-13 devlog](docs/devlog/2026-05-13-ga-baseline-upgrade-cf65515-to-6bb3104.md)）：
+  - `BaseHandler.dispatch` 签名新增 `tool_num=1` 参数（commit 3205f4a）—— **breaking**
+    - 适配：`bridge/handlers.py` 的 `WorkbenchHandler.dispatch` 加 `tool_num=1` 参数透传给 super
+    - 用途：upstream 用 `_tool_num = len(tool_calls)` 让 do_* 工具实现按并行调用数等比缩减输出长度，避免 context blow up
   - `_turn_end_hooks` 字典扩展点 + `hook(locals())` 调用约定保持
   - `agentmain.GenericAgentHandler` 导入路径保持
-  - `llmclient.backend.history` 列表读写语义保持（llmcore 新增 `resolve_client` 为 additive、`_pending_tool_ids` 空 history 清空对 history restore 利好）
-- ga.py 内部行为有改动（`_fold_earlier` working memory 折叠、`_retry_or_exit` 空响应重试、summary prompt 措辞），属预期改进——相同输入可能产生不同 agent 轨迹
-- 升级时机：upstream main 后续如有重要修复，由用户主动 `git pull upstream main` 后再升 baseline 并重跑 e2e smoke test
+  - `llmclient.backend.history` 列表读写语义保持
+- ga.py 工具实现层有改动（`do_code_run` / `do_web_scan` / `do_web_execute_js` / `do_file_read` 用动态 maxlen），属预期改进，不影响接入语义
+- 其余 4 个 commits 都是 frontend tui / docs / 静态资源，跟桥接层无关
 
-CI smoke test（`bridge/tests/test_e2e.py`）验证：
+CI smoke test（`bridge/tests/test_e2e.py` + `test_handlers.py`）验证：
 
 - `BaseHandler.tool_before_callback / tool_after_callback / turn_end_callback` 签名
 - `agent._turn_end_hooks` 字典扩展点存在
 - `llmclient.backend.history` 可读写
+
+## Baseline Upgrade Workflow
+
+GA baseline 锁死一个 commit，但需要定期升级 —— 否则用户 `git pull` 后跑在 upstream 上，「已验证版本」永远停滞，Settings 里「你已自行升级」badge 失去信号意义；同时 GA 新功能 / bug fix 无法惠及 Workbench 用户。
+
+### 触发时机（事件驱动，非日历驱动）
+
+- **Workbench 准备发版**：每次 Workbench minor 或 patch release 前，baseline 默认升一次。这是常规节奏。
+- **用户报「GA 新功能 / 行为 Workbench 跑不起来」**：立即触发审计，无需等发版。
+- **Upstream GA 有 critical fix**：安全 / 重要稳定性 bug，立即跟进。
+
+不触发：日历到点了；upstream 出了一堆普通 commit（除非积累到下次发版前的常规节奏）。
+
+### 升级 procedure（每次按这个清单走）
+
+```
+1. cd ~/Documents/GenericAgent && git fetch upstream
+   git log <current_baseline>..upstream/main --oneline
+   ↳ 看 diff 范围：N 个 commits
+
+2. 审计这 N 个 commits 对四个接口表面的影响：
+   - agent_loop.py 的 BaseHandler 三回调（tool_before_callback /
+     tool_after_callback / turn_end_callback）签名 + dispatch 生成器协议
+   - ga.py 的 _turn_end_hooks 字典扩展点 + hook(locals()) 调用约定
+   - agentmain.GenericAgentHandler 导入路径
+   - llmclient.backend.history 列表读写语义
+   ↳ 任一项变化 = breaking change，需评估桥接层 / handlers.py 适配成本
+
+3. cd ~/Documents/genericagent-webui && .venv/bin/python -m pytest bridge/tests/
+   ↳ e2e smoke test 必须全过（test_e2e.py 验证上述四个接口表面）
+
+4. dev mode 起 Workbench，跑一个 5+ 步骤的多步任务，
+   确认行为没退化（thinking placeholder / streaming / approval / tool dispatch）
+
+5. 更新 baseline 引用：
+   - 本文件「GA Baseline」section 改 commit hash + 日期 + N commits since previous baseline
+   - 如有 bridge 代码里 hardcode 的 baseline 常量也一并更新
+
+6. 写 devlog: docs/devlog/YYYY-MM-DD-ga-baseline-upgrade-{old_short}-to-{new_short}.md
+   - N 个 commits 的分类（feat/fix/refactor）
+   - 接口表面审计结论（"零 breaking change" 或 "调整了 X、桥接层做了 Y 适配"）
+   - e2e + 真跑结果
+
+7. Commit message: "Baseline upgrade {old_short} → {new_short}: N commits"
+   ↳ baseline 升级独立成一个 commit，不混进其它功能 commit，方便回滚
+```
+
+### 跟 Workbench 发版的耦合
+
+- Baseline 升级是独立 commit，跟着 Workbench 下次 release 一起 ship
+- Release notes 点名「GA baseline 升级到 {hash}」并指向 devlog
+
+### 不做的事
+
+- **不主动 UI 提醒用户「GA 有新版本可拉」**：Workbench 不政策化 GA 的版本节奏。Settings → Runtime → GA Version 里的「已对齐」/「你已自行升级」状态已经足够让用户自己判断。
+- **不自动升级**：每次升级都需要人工 audit 四个接口表面 + dogfood 真跑，自动化只能做到 e2e smoke test 这一层。
+
+### 已知的 audit 工具
+
+- 看 commits：`git log <baseline>..upstream/main --oneline`
+- 看接口表面变化：`git diff <baseline>..upstream/main -- agent_loop.py ga.py agentmain.py llmcore.py`
+- 跑 e2e：`.venv/bin/python -m pytest bridge/tests/`
 
 ## 目录结构
 
