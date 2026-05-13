@@ -500,6 +500,18 @@ interface State {
    */
   userSubmitTick: number;
   inFlightContent: string;
+  /**
+   * Per-app-instance flag: have we successfully fetched a fresh LLM
+   * list from GA's mykey.py this session? Cold start hydrates
+   * `state.llms` from a stale prefs cache, so if the user edited
+   * mykey.py since the last bridge ready event, new models won't
+   * appear in EmptyState's LLM picker until they activate an
+   * existing session. `warmupLLMList` solves this by spawning a
+   * one-shot "warmup" bridge after hydrate. This flag prevents
+   * re-running the warmup on every app render. Reset to false by
+   * `setGAConfig` so a path change retriggers the warmup.
+   */
+  _warmupComplete: boolean;
   approvalDecisions: Record<string, ApprovalDecision>;
   bridgeStatus: BridgeStatus;
   bridgeError: string | null;
@@ -686,6 +698,19 @@ interface Actions {
   setGAConfig: (
     partial: Partial<{ python: string; gaPath: string; bridgeCwd: string }>,
   ) => Promise<void>;
+
+  /**
+   * One-shot LLM list refresh on app launch (and after gaConfig
+   * changes). Spawns a temporary bridge with sessionId="__warmup__",
+   * captures its `ready` event's `availableLLMs`, writes them into
+   * top-level `state.llms` + `prefs["llm_list"]` cache, then shuts
+   * the bridge down. The whole thing finishes in ~2-3s in the
+   * background, so by the time the user clicks the LLM picker in
+   * EmptyState, the latest list (reflecting any mykey.py edits) is
+   * already there. Idempotent via `_warmupComplete` flag; skipped
+   * entirely when gaConfig is invalid (e.g. pre-onboarding).
+   */
+  warmupLLMList: () => Promise<void>;
 
   // Errors
   pushToast: (e: AppError) => void;
@@ -1030,6 +1055,8 @@ export const useAppStore = create<AppStore>((set, get) => ({
   // Global counter, not projected from any runtime — see State's
   // userSubmitTick doc comment.
   userSubmitTick: 0,
+
+  _warmupComplete: false,
 
   // Top-level projection starts as the empty runtime (no active
   // session yet). setActiveSession refreshes these.
@@ -1753,6 +1780,11 @@ export const useAppStore = create<AppStore>((set, get) => ({
         gaPath: merged.gaPath,
         pythonVersion: merged.python,
       },
+      // Reset the warmup flag so a new gaPath (or python interpreter)
+      // re-triggers a one-shot LLM list refresh against the new
+      // mykey.py. Without this, switching GA installs would leave
+      // the old install's LLM list cached in state.llms.
+      _warmupComplete: false,
     }));
     try {
       await setPref("ga_config", merged);
@@ -1780,6 +1812,11 @@ export const useAppStore = create<AppStore>((set, get) => ({
           traceback: null,
         }),
       );
+      // Retrigger warmup with the new gaConfig so the LLM picker
+      // reflects mykey.py from the new GA install without requiring
+      // a Workbench restart. (Existing sessions still need a restart
+      // — their bridges are already running.)
+      void get().warmupLLMList();
     }
   },
 
@@ -1828,6 +1865,85 @@ export const useAppStore = create<AppStore>((set, get) => ({
         pendingLLMIndex: index,
       };
     });
+  },
+
+  warmupLLMList: async () => {
+    if (get()._warmupComplete) return;
+    const config = get().gaConfig;
+    // Pre-onboarding / invalid config — bridge spawn would just error.
+    // setGAConfig will re-trigger us once the user picks a real path.
+    if (!config.gaPath) return;
+
+    // Set early to dedupe concurrent calls (e.g. App.tsx triggers
+    // hydrate which triggers us, while a separate effect also pings).
+    set({ _warmupComplete: true });
+
+    // Race guard: spawnBridgeProcess's stdout listener can fire
+    // `ready` between command.spawn() resolution and `client`
+    // assignment. We capture the ready inside the handler regardless
+    // and use a deferred-shutdown flag for the late case.
+    let client: BridgeClient | null = null;
+    let pendingShutdown = false;
+    let readyHandled = false;
+
+    try {
+      client = await spawnBridgeProcess(
+        {
+          ...config,
+          sessionId: "__warmup__",
+        },
+        {
+          onEvent: (event) => {
+            if (event.kind !== "ready" || readyHandled) return;
+            readyHandled = true;
+            const llms: LLMOption[] = event.availableLLMs.map((l) => ({
+              index: l.index,
+              displayName: l.displayName,
+              isCurrent: l.isCurrent,
+            }));
+            const current = llms.find((l) => l.isCurrent);
+            set((state) => ({
+              llms,
+              llmDisplayName:
+                current?.displayName ?? state.llmDisplayName,
+            }));
+            void setPref("llm_list", llms).catch((e) => {
+              console.debug("[warmup] llm_list cache failed.", e);
+            });
+            // Shutdown the warmup bridge — we only needed the
+            // ready event. If client isn't yet assigned (the
+            // spawn promise hasn't resolved on this microtask
+            // yet), defer to post-assignment below.
+            if (client) {
+              void client.shutdown(5000);
+            } else {
+              pendingShutdown = true;
+            }
+          },
+          onStderr: (line) => console.debug("[warmup stderr]", line),
+          onClose: () => console.debug("[warmup] closed"),
+          onError: (msg) => console.warn("[warmup] error:", msg),
+        },
+      );
+      if (pendingShutdown) {
+        void client.shutdown(5000);
+      }
+      // Belt-and-suspenders: if `ready` never arrives within 15s
+      // (bad gaPath, mykey.py syntax error, etc.), kill the orphan
+      // bridge so we don't leak a Python process. _warmupComplete
+      // stays true so we don't retry this app instance — the user
+      // will see stale list and can restart or update gaConfig.
+      setTimeout(() => {
+        if (!readyHandled && client) {
+          console.warn("[warmup] ready timeout, shutting down");
+          void client.shutdown(5000);
+        }
+      }, 15000);
+    } catch (e) {
+      console.warn("[store] warmupLLMList spawn failed:", e);
+      // Reset so a future setGAConfig (or app restart) can retry.
+      set({ _warmupComplete: false });
+    }
   },
 
   // ---- Conversation (per-session) ----
@@ -2304,6 +2420,15 @@ export const useAppStore = create<AppStore>((set, get) => ({
     } catch (e) {
       console.warn("[store] hydrateFromDB: ga_config pref load failed.", e);
     }
+
+    // After hydrate completes (sessions / projects / prefs all loaded
+    // and gaConfig finalized), kick off a warmup bridge to refresh
+    // the LLM list from mykey.py. The prefs cache loaded above is
+    // stale if the user edited mykey.py since the last bridge ready
+    // event; warmup ensures EmptyState shows the current list before
+    // the user clicks the LLM picker. Fire-and-forget — warmup runs
+    // in the background and doesn't block hydrate completion.
+    void get().warmupLLMList();
   },
 
   seedMockSessions: async () => {
