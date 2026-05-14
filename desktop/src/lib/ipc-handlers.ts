@@ -549,6 +549,27 @@ const FIVE_BACKTICK_BLOCK = /`{5}\n[\s\S]*?\n`{5}\n?/g;
 const FIVE_BACKTICK_PARTIAL = /`{5}\n?$/;
 
 /**
+ * "当前阶段：..." preamble that GA's [sys_prompt.txt:4] obliges the
+ * LLM to write before every tool call ("调用工具前先推演：当前阶段、
+ * 上步结果是否符合预期、下步策略"). The structured `<summary>` form
+ * of the same content lands as TurnMarker副标题 via turn_end's
+ * `summary` field — the prose preamble is a verbose duplicate.
+ *
+ * Pattern matches the line beginning + everything up to the next
+ * blank line (or end-of-buffer for partials). The optional `**`
+ * wrapping covers the cases where the LLM markdown-bolds the
+ * label. `[：:]` handles both full-width and half-width colon.
+ *
+ * If the LLM's entire intermediate-turn prose is just this
+ * preamble, stripping it leaves the partial empty → the
+ * ThinkingMarker placeholder takes over, which is the right UX
+ * (a tight "思考中" beats verbose "当前阶段：还在走 Google 搜索"
+ * filler).
+ */
+const PHASE_PREAMBLE =
+  /^\*{0,2}当前阶段\*{0,2}\s*[：:][\s\S]*?(?=\n\n|$)/gm;
+
+/**
  * Mirror of bridge's `_clean_response_for_display`. Strips GA's
  * structured tags so the user sees the prose-ish final answer
  * Newsreader can render directly. Bridge emits the raw responseContent
@@ -560,6 +581,7 @@ function cleanFinalAnswer(text: string): string {
   let out = text;
   for (const p of GA_TAG_PATTERNS) out = out.replace(p, "");
   out = out.replace(LLM_RUNNING_MARKER, "");
+  out = out.replace(PHASE_PREAMBLE, "");
   out = out.replace(FILE_REF_PATTERN, "");
   out = out.replace(/\n{3,}/g, "\n\n");
   return out.trim();
@@ -640,6 +662,13 @@ export function cleanPartialContent(text: string): string {
     // Chunk ended exactly on a fence open, no newline yet.
     out = out.replace(FIVE_BACKTICK_PARTIAL, "");
   }
+
+  // 1g. Strip "当前阶段：..." preamble paragraphs that GA's
+  //     sys_prompt obliges the LLM to write before every tool call.
+  //     The same content arrives in structured form via <summary>
+  //     → TurnMarker副标题; the prose preamble is a duplicate the
+  //     user reads twice. See PHASE_PREAMBLE comment.
+  out = out.replace(PHASE_PREAMBLE, "");
 
   // 2. Unclosed open tag — truncate at its position.
   let earliestUnclosed = -1;
