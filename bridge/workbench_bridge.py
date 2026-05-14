@@ -250,6 +250,87 @@ def _resolve_ga_commit(ga_path: str) -> tuple[str, str]:
         return "unknown", "unknown"
 
 
+# ---------------- Fence filter ----------------
+
+
+class _FenceFilter:
+    """Stateful stream filter that hides content between GA's
+    5-backtick fence markers (`\\`\\`\\`\\`\\`\\n` ... `\\`\\`\\`\\`\\`\\n`) before it
+    crosses the IPC wire.
+
+    With `agent.verbose = True` GA's `agent_loop.py:79-81` wraps every
+    tool dispatch's stdout in those fences:
+
+        `````
+        [Action] Running python in temp: ...
+        <subprocess stdout, potentially thousands of chars>
+        `````
+
+    Desktop already strips this content from `inFlightContent` before
+    rendering (see lib/ipc-handlers.ts `FIVE_BACKTICK_BLOCK`), so
+    forwarding it just burns IPC bandwidth, React re-renders, and
+    quadratic-time regex passes over a growing buffer. Filtering at
+    the bridge eliminates the waste end-to-end.
+
+    State per task: one instance per `_start_progress_drain` call
+    (each `put_task` gets a fresh drain thread). Carries up to
+    `len(FENCE) - 1` chars across deltas so a fence marker split
+    by a chunk boundary still resolves correctly.
+
+    The marker itself is also dropped — it's GA's terminal-frontend
+    chrome, not user-facing content.
+    """
+
+    FENCE = "`````\n"
+
+    def __init__(self) -> None:
+        self.inside = False
+        # Trailing bytes from the previous delta that could be the
+        # start of a fence marker. Capped at len(FENCE) - 1 chars.
+        self.carry = ""
+
+    def feed(self, delta: str) -> str:
+        """Process one delta; return the part to emit over IPC.
+
+        Outside-fence content passes through unchanged. Fence markers
+        themselves and inside-fence content are dropped. Trailing
+        bytes that could be the prefix of a fence marker are held
+        back as `carry` for the next call.
+        """
+        text = self.carry + delta
+        self.carry = ""
+        parts: list[str] = []
+        i = 0
+        while True:
+            j = text.find(self.FENCE, i)
+            if j != -1:
+                # Complete fence marker at position j; flip state.
+                if not self.inside:
+                    parts.append(text[i:j])
+                self.inside = not self.inside
+                i = j + len(self.FENCE)
+                continue
+            # No more complete markers. Stash a potential partial
+            # marker at the end for next call so we don't accidentally
+            # emit the start of a fence as content.
+            remaining = text[i:]
+            suffix_len = 0
+            max_suffix = min(len(self.FENCE) - 1, len(remaining))
+            for n in range(max_suffix, 0, -1):
+                if self.FENCE.startswith(remaining[-n:]):
+                    suffix_len = n
+                    break
+            if suffix_len > 0:
+                self.carry = remaining[-suffix_len:]
+                emit_end = len(text) - suffix_len
+            else:
+                emit_end = len(text)
+            if not self.inside and emit_end > i:
+                parts.append(text[i:emit_end])
+            break
+        return "".join(parts)
+
+
 # ---------------- Pending approval ----------------
 
 
@@ -567,6 +648,11 @@ class Bridge:
         on `done` or on shutdown.
         """
 
+        # One filter instance per drain (= per `put_task`). Carries
+        # fence state across deltas within a single task; new task
+        # starts clean.
+        fence_filter = _FenceFilter()
+
         def drain() -> None:
             try:
                 while True:
@@ -608,10 +694,17 @@ class Bridge:
                         delta = item["next"]
                         if not isinstance(delta, str) or not delta:
                             continue
+                        # Filter out content inside 5-backtick fences
+                        # (verbose-mode tool stdout). Empty filtered
+                        # delta = whole chunk was inside fence; skip
+                        # the IPC emit entirely.
+                        filtered = fence_filter.feed(delta)
+                        if not filtered:
+                            continue
                         self._emit(
                             TurnProgressEvent(
                                 sessionId=self.session_id,
-                                delta=delta,
+                                delta=filtered,
                                 source=str(item.get("source", "")),
                             )
                         )

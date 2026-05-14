@@ -10,6 +10,7 @@ import pytest
 
 from bridge.workbench_bridge import (
     Bridge,
+    _FenceFilter,
     _classify_error,
     _simplify_llm_name,
 )
@@ -156,3 +157,88 @@ def test_extract_ask_user_coerces_non_string_candidates() -> None:
     ]
     result = Bridge._extract_ask_user(tool_calls)
     assert result == ("Pick one", ["1", "two", "3.0"])
+
+
+# ---------------- _FenceFilter ----------------
+#
+# Streaming filter that hides content between GA's 5-backtick fence
+# markers (verbose-mode tool stdout). Each test feeds the filter
+# fragments to simulate IPC chunk boundaries and asserts the
+# concatenated output matches what should reach the desktop.
+
+
+def _feed_all(filter_: _FenceFilter, *chunks: str) -> str:
+    return "".join(filter_.feed(c) for c in chunks)
+
+
+def test_fence_filter_passes_through_outside_content() -> None:
+    f = _FenceFilter()
+    assert f.feed("hello world\n") == "hello world\n"
+    assert not f.inside
+    assert f.carry == ""
+
+
+def test_fence_filter_drops_complete_fenced_block_in_one_delta() -> None:
+    f = _FenceFilter()
+    out = f.feed("before\n`````\nsubprocess stdout\n`````\nafter")
+    assert out == "before\nafter"
+    assert not f.inside
+
+
+def test_fence_filter_drops_inside_chunks_across_deltas() -> None:
+    """Fence open + body + close split across three deltas."""
+    f = _FenceFilter()
+    # Delta 1: outside + opener
+    assert f.feed("prose\n`````\n") == "prose\n"
+    assert f.inside
+    # Delta 2: body only (still inside)
+    assert f.feed("[Action] Running python in temp: ...\n") == ""
+    assert f.inside
+    # Delta 3: closer + more outside
+    assert f.feed("`````\ntail") == "tail"
+    assert not f.inside
+
+
+def test_fence_filter_handles_marker_split_at_chunk_boundary() -> None:
+    """Fence marker bytes split between two deltas — filter must
+    rejoin via carry and still detect the marker."""
+    f = _FenceFilter()
+    # First delta ends mid-marker: 3 backticks
+    out1 = f.feed("outside```")
+    # Carry holds the 3 backticks; "outside" emitted.
+    assert out1 == "outside"
+    assert f.carry == "```"
+    # Second delta completes the marker (2 more backticks + newline)
+    # then inside content.
+    out2 = f.feed("``\nINSIDE\n`````\nOUTSIDE")
+    assert out2 == "OUTSIDE"
+    assert not f.inside
+
+
+def test_fence_filter_releases_carry_when_not_a_marker() -> None:
+    """A trailing backtick that turns out NOT to be the start of a
+    fence (next chunk doesn't extend it into a full marker) must
+    be emitted, not silently swallowed."""
+    f = _FenceFilter()
+    assert f.feed("text`") == "text"
+    assert f.carry == "`"
+    # Next chunk is non-backtick — the held-back `\`` is no longer a
+    # possible marker prefix and should flush.
+    assert f.feed("xyz") == "`xyz"
+    assert f.carry == ""
+
+
+def test_fence_filter_multiple_fences_in_one_delta() -> None:
+    f = _FenceFilter()
+    out = f.feed("a\n`````\nb\n`````\nc\n`````\nd\n`````\ne")
+    assert out == "a\nc\ne"
+
+
+def test_fence_filter_marker_at_very_end_leaves_state_inside() -> None:
+    """A delta that ends exactly on a fence-open should flip state to
+    inside without leaving anything for the next call to bridge."""
+    f = _FenceFilter()
+    out = f.feed("preamble\n`````\n")
+    assert out == "preamble\n"
+    assert f.inside
+    assert f.carry == ""
