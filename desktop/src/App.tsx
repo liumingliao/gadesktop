@@ -9,6 +9,7 @@ import { EmptyState } from "@/components/screens/EmptyState";
 import { MainView } from "@/components/screens/MainView";
 import { Onboarding } from "@/components/screens/onboarding/Onboarding";
 import { Settings } from "@/components/screens/settings/Settings";
+import { YoloIntroDialog } from "@/components/screens/YoloIntroDialog";
 import { ArchivedDialog } from "@/components/screens/archived/ArchivedDialog";
 import { EarlierDialog } from "@/components/screens/earlier/EarlierDialog";
 import { CreateProjectDialog } from "@/components/screens/project/CreateProjectDialog";
@@ -100,6 +101,8 @@ function App() {
   const removeAlwaysAllow = useAppStore((s) => s.removeAlwaysAllow);
   const yoloMode = useAppStore((s) => s.yoloMode);
   const setYoloMode = useAppStore((s) => s.setYoloMode);
+  const yoloIntroSeen = useAppStore((s) => s.yoloIntroSeen);
+  const acknowledgeYoloIntro = useAppStore((s) => s.acknowledgeYoloIntro);
   const conversationWidth = useAppStore((s) => s.conversationWidth);
   const setConversationWidth = useAppStore((s) => s.setConversationWidth);
   const petAttachedSessionId = useAppStore((s) => s.petAttachedSessionId);
@@ -741,6 +744,13 @@ function App() {
         onOpenMyKey={() => console.info("[toast] open mykey.py")}
         onOpenGADocs={() => console.info("[toast] open GA docs")}
         onRetry={() => console.info("[toast] retry")}
+      />
+
+      <YoloIntroDialog
+        open={!yoloIntroSeen}
+        onAcknowledge={(revertToApproval) => {
+          void acknowledgeYoloIntro(revertToApproval);
+        }}
       />
 
       {import.meta.env.DEV && (

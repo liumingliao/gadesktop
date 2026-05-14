@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import {
   StepAttach,
@@ -6,10 +6,16 @@ import {
 } from "@/components/screens/onboarding/StepAttach";
 import { StepHealth } from "@/components/screens/onboarding/StepHealth";
 import { StepWelcome } from "@/components/screens/onboarding/StepWelcome";
+import { TutorialModal } from "@/components/screens/onboarding/TutorialModal";
 import {
   runHealthChecks,
   validateGAPath,
 } from "@/lib/onboarding-validation";
+import {
+  TUTORIALS,
+  type Tutorial,
+  type TutorialId,
+} from "@/lib/onboarding-tutorials";
 import { cn } from "@/lib/utils";
 import type { HealthCheckItem } from "@/types/inspector";
 
@@ -23,7 +29,7 @@ export interface OnboardingProps {
 
 const STEP_LABELS: { key: OnboardingStep | "done"; label: string }[] = [
   { key: "welcome", label: "欢迎" },
-  { key: "attach", label: "Attach GA" },
+  { key: "attach", label: "接入 GA" },
   { key: "health", label: "Health Check" },
   { key: "done", label: "完成" },
 ];
@@ -45,6 +51,16 @@ export function Onboarding({ onComplete }: OnboardingProps) {
   const [step, setStep] = useState<OnboardingStep>("welcome");
   const [path, setPath] = useState("~/Documents/GenericAgent");
   const [validation, setValidation] = useState<PathValidation>(null);
+  // Active tutorial modal id; null = closed. Set by StepAttach
+  // tutorial buttons and StepHealth row-action clicks. Surfaces the
+  // matching hand-written snippet from `lib/onboarding-tutorials`.
+  const [activeTutorial, setActiveTutorial] = useState<TutorialId | null>(
+    null,
+  );
+  // Bumped by the "重新检查" button to re-trigger the runHealthChecks
+  // effect without going Back → Continue. Same dep array; an integer
+  // change forces the effect to re-fire and cancels any in-flight run.
+  const [healthRunNonce, setHealthRunNonce] = useState(0);
 
   // Debounced real path validation via Tauri fs plugin. The
   // setTimeout pacing keeps the UI responsive while the user is still
@@ -103,7 +119,48 @@ export function Onboarding({ onComplete }: OnboardingProps) {
     const controller = new AbortController();
     void runHealthChecks(path, setHealthChecks, controller.signal);
     return () => controller.abort();
-  }, [step, path]);
+  }, [step, path, healthRunNonce]);
+
+  // Tutorial mapping: each named health check (and StepAttach failure)
+  // maps to one fix-it snippet. The action id we hand to
+  // HealthCheckCard is the same string as the tutorial id, so the
+  // onItemAction handler can look it up directly without a separate
+  // dispatch table.
+  const itemActions = useMemo<
+    Record<string, { id: string; label: string }[]>
+  >(
+    () => ({
+      "GA 路径存在": [{ id: "download-ga", label: "查看教程：下载 GA" }],
+      "agentmain.py 可见": [
+        { id: "wrong-directory", label: "查看教程：选对目录" },
+      ],
+      "mykey.py 存在": [
+        { id: "mykey-setup", label: "查看教程：配置 API 密钥" },
+      ],
+      "memory/ 目录可见": [
+        { id: "memory-info", label: "查看：为什么是警告" },
+      ],
+      "assets/ 目录可见": [
+        { id: "assets-missing", label: "查看教程：重装 GA" },
+      ],
+    }),
+    [],
+  );
+
+  const handleItemAction = (
+    _item: HealthCheckItem,
+    actionId: string,
+  ) => {
+    if (isTutorialId(actionId)) setActiveTutorial(actionId);
+  };
+
+  const handleShowTutorial = (id: TutorialId) => {
+    setActiveTutorial(id);
+  };
+
+  const activeTutorialEntry: Tutorial | null = activeTutorial
+    ? TUTORIALS[activeTutorial]
+    : null;
 
   const handleContinueAttach = () => {
     if (validation?.kind !== "ok") return;
@@ -135,6 +192,7 @@ export function Onboarding({ onComplete }: OnboardingProps) {
               }}
               onBack={() => setStep("welcome")}
               onContinue={handleContinueAttach}
+              onShowTutorial={handleShowTutorial}
             />
           )}
           {step === "health" && (
@@ -142,11 +200,29 @@ export function Onboarding({ onComplete }: OnboardingProps) {
               items={healthChecks}
               onBack={() => setStep("attach")}
               onContinue={handleFinish}
+              onRetry={() => setHealthRunNonce((n) => n + 1)}
+              onItemAction={handleItemAction}
+              itemActions={itemActions}
             />
           )}
         </div>
       </div>
+
+      <TutorialModal
+        tutorial={activeTutorialEntry}
+        onClose={() => setActiveTutorial(null)}
+      />
     </div>
+  );
+}
+
+function isTutorialId(s: string): s is TutorialId {
+  return (
+    s === "download-ga" ||
+    s === "wrong-directory" ||
+    s === "mykey-setup" ||
+    s === "assets-missing" ||
+    s === "memory-info"
   );
 }
 

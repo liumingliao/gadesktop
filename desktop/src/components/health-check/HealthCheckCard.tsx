@@ -146,7 +146,13 @@ function HealthRow({
   actions: ItemAction[];
   onAction: (action: string) => void;
 }) {
-  const showActions = item.state === "failed" && actions.length > 0;
+  // Warnings (e.g. mykey.py missing — user-supplied + .gitignored)
+  // also surface a tutorial action: "this is fixable, here's how".
+  // Failures and warnings share the same action treatment; success /
+  // running / pending rows have nothing to fix so we skip.
+  const showActions =
+    (item.state === "failed" || item.state === "warning") &&
+    actions.length > 0;
 
   return (
     <div className="border-b border-line py-2.5 last:border-b-0">

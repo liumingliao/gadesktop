@@ -18,6 +18,7 @@ import {
   X as XIcon,
 } from "@phosphor-icons/react";
 
+import { Button } from "@/components/ui/button";
 import { StatusIcon } from "@/lib/status-icon";
 import {
   BUCKET_LABEL,
@@ -1215,18 +1216,14 @@ function SidebarProjectEmptyCta({
       <p className="font-serif text-[12px] italic text-ink-muted">
         {projectName} 还没有对话。
       </p>
-      <button
-        type="button"
+      <Button
         onClick={onNewChat}
-        className={cn(
-          "inline-flex items-center gap-1.5 self-start rounded-sm border border-brand-strong bg-brand-strong px-3 py-1.5 text-[12.5px] font-medium text-elevated",
-          "transition-colors hover:bg-brand-strong/90",
-        )}
+        className="self-start"
         title={`在 ${projectName} 里新建对话`}
+        leadingIcon={<Plus size={12} weight="thin" />}
       >
-        <Plus size={12} weight="thin" />
         在 {projectName} 里新建对话
-      </button>
+      </Button>
       <p className="text-[11px] text-ink-muted">
         或右键已有对话「加入项目」
       </p>

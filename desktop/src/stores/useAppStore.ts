@@ -471,8 +471,22 @@ interface State {
    * alive bridge bypasses the approval gate. Persisted to prefs
    * (sticky across launches). Global, not per-session — flipping
    * this notifies every alive bridge.
+   *
+   * Default `true` for v0.1 — Galley's first-batch users are GA
+   * heavy users who run agents without approval. The first-launch
+   * `YoloIntroDialog` discloses this state and offers a one-click
+   * revert to approval mode for those who want it.
    */
   yoloMode: boolean;
+  /**
+   * Has the user dismissed the first-launch YOLO disclosure modal?
+   * Persisted to prefs (`yolo_intro_seen`). Initial state defaults
+   * to `true` so the modal stays hidden during cold start; the
+   * hydrate step flips it to `false` when the pref is missing,
+   * which is the only case that should surface the modal. Set
+   * back to `true` by either CTA on the modal.
+   */
+  yoloIntroSeen: boolean;
   /**
    * Desktop Pet attached session id. Pet is a global feature (only
    * one instance can run at a time since it binds a fixed local
@@ -771,6 +785,13 @@ interface Actions {
    * does not gate it.
    */
   setYoloMode: (enabled: boolean) => Promise<void>;
+  /**
+   * Dismiss the first-launch YOLO disclosure modal. Optionally
+   * reverts YOLO to off (when the user picked "改回审批模式" rather
+   * than "知道了"). Persists `yolo_intro_seen=true` so the modal
+   * never resurfaces on this device.
+   */
+  acknowledgeYoloIntro: (revertToApproval?: boolean) => Promise<void>;
   /**
    * Toggle / set the conversation column width mode. Persists to
    * prefs (`conversation_width`) so the choice survives restart.
@@ -1188,7 +1209,8 @@ export const useAppStore = create<AppStore>((set, get) => ({
   gaConfig: DEMO_GA_CONFIG,
 
   approvalConfig: DEMO_APPROVAL_CONFIG,
-  yoloMode: false,
+  yoloMode: true,
+  yoloIntroSeen: true,
   conversationWidth: "compact",
   petAttachedSessionId: null,
   pendingPetMigrationTo: null,
@@ -1902,6 +1924,23 @@ export const useAppStore = create<AppStore>((set, get) => ({
     }
   },
 
+  acknowledgeYoloIntro: async (revertToApproval = false) => {
+    // Order matters: flip YOLO before marking the modal seen so
+    // bridges receive the new state alongside the prefs write.
+    if (revertToApproval) {
+      await useAppStore.getState().setYoloMode(false);
+    }
+    set({ yoloIntroSeen: true });
+    try {
+      await setPref("yolo_intro_seen", true);
+    } catch (e) {
+      console.warn(
+        "[store] acknowledgeYoloIntro: pref persistence failed.",
+        e,
+      );
+    }
+  },
+
   setConversationWidth: async (mode) => {
     set({ conversationWidth: mode });
     try {
@@ -2563,17 +2602,40 @@ export const useAppStore = create<AppStore>((set, get) => ({
         e,
       );
     }
-    // YOLO mode (PRD §11.5) — sticky preference. Best-effort load;
-    // defaults to `false` from initial state when SQLite is
-    // unavailable. We don't call setYoloMode() here so as not to
-    // double-persist on startup or attempt to notify a bridge that
-    // doesn't exist yet — the on-`ready` IPC handler does that sync
-    // when a bridge does spawn.
+    // YOLO mode (PRD §11.5) — sticky preference. Best-effort load.
+    // Initial state defaults to `true` (Galley first-launch behavior
+    // for GA heavy users); we honor any explicit boolean from prefs.
+    // We don't call setYoloMode() here so as not to double-persist
+    // on startup or attempt to notify a bridge that doesn't exist
+    // yet — the on-`ready` IPC handler does that sync when a bridge
+    // does spawn.
+    let userHasYoloPref = false;
     try {
       const yolo = await getPref<boolean>("yolo_mode");
-      if (yolo === true) set({ yoloMode: true });
+      if (typeof yolo === "boolean") {
+        set({ yoloMode: yolo });
+        userHasYoloPref = true;
+      }
     } catch (e) {
       console.warn("[store] hydrateFromDB: yolo pref load failed.", e);
+    }
+    // YOLO intro modal — surfaces once for true-new users to disclose
+    // that YOLO is the default. Initial state is `true` (hidden) so
+    // the modal doesn't flash during cold start; only flip to `false`
+    // when both prefs say "user has never expressed a YOLO opinion on
+    // this device". Existing dogfood users who already toggled YOLO
+    // (pref present) skip the dialog — their preference is settled,
+    // the disclosure would be confusing.
+    if (!userHasYoloPref) {
+      try {
+        const seen = await getPref<boolean>("yolo_intro_seen");
+        if (seen !== true) set({ yoloIntroSeen: false });
+      } catch (e) {
+        console.warn(
+          "[store] hydrateFromDB: yolo_intro_seen pref load failed.",
+          e,
+        );
+      }
     }
     try {
       const width = await getPref<"compact" | "wide">("conversation_width");

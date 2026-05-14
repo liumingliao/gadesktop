@@ -1,12 +1,4 @@
 import {
-  BookOpenText,
-  NotePencil,
-  TerminalWindow,
-  Translate,
-  type Icon as PhosphorIcon,
-} from "@phosphor-icons/react";
-
-import {
   Composer,
   type ComposerLLMOption,
 } from "@/components/conversation/Composer";
@@ -14,23 +6,37 @@ import { cn } from "@/lib/utils";
 
 interface QuickPrompt {
   label: string;
-  Icon: PhosphorIcon;
   /** Optional explicit prompt text; defaults to label. */
   prompt?: string;
 }
 
+/**
+ * Empty-state prompt suggestions — each is a complete, runnable
+ * showcase of GA's multi-step / multi-source capability. They span
+ * four "task shapes" so a first-time user can pick whichever matches
+ * their interest:
+ *
+ *   - 新闻：web scan across multiple sources
+ *   - Downloads：local filesystem ops + analysis
+ *   - 电影资讯：multi-source web research
+ *   - 哲学 × LLM：pure-reasoning demo (no tools, shows GA is also a
+ *     thoughtful conversational layer)
+ *
+ * Labels ARE the prompt — what the line says is what the agent
+ * receives, no surprise.
+ */
 const DEFAULT_QUICK_PROMPTS: QuickPrompt[] = [
-  { label: "翻译", Icon: Translate },
-  { label: "整理会议笔记", Icon: NotePencil },
-  { label: "论文查询", Icon: BookOpenText },
-  { label: "写脚本", Icon: TerminalWindow },
+  { label: "这两天有什么有趣的新闻？" },
+  { label: "列出 Downloads 里面最大的 10 个文件" },
+  { label: "查电影《奥德赛》的最新资讯" },
+  { label: "聊聊维特根斯坦与 LLM" },
 ];
 
 export interface EmptyStateProps {
   llmDisplayName: string;
   onSubmit?: (text: string) => void;
-  /** Click handler for a quick prompt chip. Receives the prompt text
-   * (label by default; can be overridden per chip via QuickPrompt.prompt). */
+  /** Click handler for a prompt suggestion. Receives the prompt text
+   * (label by default; can be overridden per row via QuickPrompt.prompt). */
   onQuickPrompt?: (prompt: string) => void;
   prompts?: QuickPrompt[];
   /** LLM list for the Composer's inline picker. Drives the popover
@@ -51,13 +57,24 @@ export interface EmptyStateProps {
 }
 
 /**
- * Empty state — what the user sees the first time they launch
- * Workbench (and any time no session is active). Per DESIGN.md §7.
+ * Empty state — what the user sees the first time they launch Galley
+ * (and any time no session is active). Per DESIGN.md §7.
  *
- * Hero composer floats vertically centered with the apricot-italic
- * "你想做什么？" question above. Four quick-prompt chips below — tilted
- * deliberately *non-coding* (translation / notes / papers / scripts) to
- * embody the "general agent" mental model.
+ * Minimalist Linear-style: no heading, Composer is the focal point.
+ * Placeholder "今天交代什么？" carries the invitation in product voice
+ * ("交代" implies handing a task to an agent — more honest than
+ * "你想做什么？" Q&A framing).
+ *
+ * Below the Composer, four prompt suggestions appear as ambient
+ * italic-serif hints rather than chip-style buttons. The visual
+ * weight is deliberately quiet — these are positioning signals
+ * (Galley is built for web research / local-file ops / multi-source
+ * comparison / reasoning), not call-to-action chips. A reader's eye
+ * walks the Composer first; the prompts read as "btw, here are some
+ * directions" only when they choose to look down.
+ *
+ * Click any line → submits that prompt directly (still actionable,
+ * just without button chrome).
  */
 export function EmptyState({
   llmDisplayName,
@@ -77,13 +94,9 @@ export function EmptyState({
           conversationWidth === "wide" ? "max-w-[1200px]" : "max-w-[560px]",
         )}
       >
-        <div className="mb-6 text-center font-serif text-[22px] italic leading-tight tracking-[0.005em] text-ink-soft">
-          你想做什么？
-        </div>
-
         <Composer
           llmDisplayName={llmDisplayName}
-          placeholder="问点什么，或粘贴一段文字 / 文件路径…"
+          placeholder="今天交代什么？"
           onSubmit={onSubmit}
           autoFocus
           llms={llms}
@@ -91,46 +104,28 @@ export function EmptyState({
           onOpenLLMSwitcher={onOpenLLMSwitcher}
         />
 
-        <div className="mt-5 flex flex-wrap items-center justify-center gap-2.5">
+        <ul className="mt-6 flex flex-col items-center gap-2 text-center">
           {prompts.map((p) => (
-            <PromptChip
-              key={p.label}
-              icon={<p.Icon size={14} weight="thin" />}
-              label={p.label}
-              onClick={() => onQuickPrompt?.(p.prompt ?? p.label)}
-            />
+            <li key={p.label}>
+              <button
+                type="button"
+                onClick={() => onQuickPrompt?.(p.prompt ?? p.label)}
+                className={cn(
+                  "rounded-sm font-serif text-[12.5px] italic leading-[1.55] text-ink-muted",
+                  "transition-colors hover:text-ink",
+                )}
+              >
+                {p.label}
+              </button>
+            </li>
           ))}
-        </div>
+        </ul>
 
         {/* Keyboard hints intentionally not shown here. Empty state
             is the user's first impression; loading it with shortcut
-            chrome dilutes the focus on "你想做什么?". The full
-            shortcut list lives in Settings → Shortcuts. */}
+            chrome dilutes focus on the composer. The full shortcut
+            list lives in Settings → Shortcuts. */}
       </div>
     </div>
-  );
-}
-
-function PromptChip({
-  icon,
-  label,
-  onClick,
-}: {
-  icon: React.ReactNode;
-  label: string;
-  onClick?: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={cn(
-        "inline-flex items-center gap-1.5 rounded-full border border-line bg-elevated px-3 py-1.5 text-[12.5px] text-ink-soft",
-        "transition-colors hover:border-brand hover:bg-brand-soft hover:text-ink",
-      )}
-    >
-      <span className="text-ink-soft">{icon}</span>
-      <span>{label}</span>
-    </button>
   );
 }

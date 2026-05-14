@@ -109,6 +109,32 @@ def test_simplify_llm_name(raw: str, expected: str) -> None:
     assert _simplify_llm_name(raw) == expected
 
 
+@pytest.mark.parametrize(
+    "raw,model,expected",
+    [
+        # name == model (no explicit user name): prettify the model
+        ("NativeOAISession/gpt-5.5", "gpt-5.5", "GPT 5.5"),
+        ("NativeClaudeSession/claude-opus-4-6", "claude-opus-4-6",
+         "Claude opus-4-6"),
+        # name != model (user set explicit name in mykey.py): verbatim
+        ("NativeClaudeSession/claude-main", "claude-opus-4-6", "claude-main"),
+        ("NativeOAISession/gpt-backup", "gpt-5.5", "gpt-backup"),
+        # Custom name with brand-like prefix still respected verbatim
+        ("LLMSession/my-fast-claude", "claude-haiku-4-5", "my-fast-claude"),
+        # Lowercased / underscored user names preserved (no auto-capitalize)
+        ("NativeOAISession/team_shared", "gpt-5.5", "team_shared"),
+        # model=None falls through to prettify (legacy single-arg behavior)
+        ("NativeOAISession/gpt-4o", None, "GPT 4o"),
+        # Empty model treated as missing (defensive)
+        ("NativeOAISession/gpt-4o", "", "GPT 4o"),
+    ],
+)
+def test_simplify_llm_name_respects_explicit_name(
+    raw: str, model: str | None, expected: str
+) -> None:
+    assert _simplify_llm_name(raw, model) == expected
+
+
 # ---------------- _extract_ask_user ----------------
 
 

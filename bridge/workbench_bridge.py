@@ -145,24 +145,63 @@ _LLM_BRAND_NAMES: dict[str, str] = {
 }
 
 
-def _simplify_llm_name(raw: str) -> str:
-    """Prettify GA's 'ClassName/model-name' raw LLM identifier.
+def _simplify_llm_name(raw: str, model: str | None = None) -> str:
+    """Resolve GA's 'ClassName/backend.name' raw identifier into the
+    string the user actually wants to see in the Composer pill.
 
-    GA's get_llm_name returns f"{type(backend).__name__}/{backend.name}", e.g.
-    "NativeClaudeSession/glm-5.1". We strip the class prefix and capitalize
-    the brand keyword so the Composer LLM switcher reads naturally.
+    GA's `backend.name` defaults to `backend.model` when the user
+    didn't set a `name` field in mykey.py; when they did set one
+    (`'name': 'claude-main'`), that's what the user's mental model
+    of "which LLM am I on" hangs on. Respecting the explicit name
+    matters for users juggling multiple configs of the same brand
+    (claude-main vs claude-fallback).
 
-    Examples:
+    Heuristic (when `model` is provided by the caller):
+      - `name != model` → user set an explicit name → return it
+                          verbatim, preserving their exact casing
+                          and tokens.
+      - `name == model` → user accepted the default → prettify the
+                          model (strip class prefix, capitalize
+                          brand keyword) so the pill reads naturally.
+
+    Without `model` (legacy single-arg callers, or Mixin sessions
+    that don't expose `.model`), falls through to the prettify path
+    so behavior matches the original signature.
+
+    Examples (legacy / model-defaulted):
         NativeClaudeSession/glm-5.1     -> GLM 5.1
         ClaudeSession/claude-3-5-sonnet -> Claude 3-5-sonnet
         NativeOAISession/gpt-4o          -> GPT 4o
         LLMSession/qwen-max              -> Qwen max
         BADCONFIG_MIXIN                  -> BADCONFIG_MIXIN  (unchanged)
+
+    Examples (explicit name):
+        NativeClaudeSession/claude-main, model="claude-opus-4-6"
+                                         -> claude-main
+        NativeOAISession/gpt-backup,     model="gpt-5.5"
+                                         -> gpt-backup
     """
-    model = raw.split("/", 1)[1] if "/" in raw else raw
-    parts = model.split("-", 1)
+    name = raw.split("/", 1)[1] if "/" in raw else raw
+    # Empty string treated as missing — defensive, since some GA paths
+    # surface `''` rather than None for an absent model attribute.
+    if model and name != model:
+        return name
+    parts = name.split("-", 1)
     brand = _LLM_BRAND_NAMES.get(parts[0].lower(), parts[0])
     return f"{brand} {parts[1]}" if len(parts) > 1 else brand
+
+
+def _safe_get_model(client: Any) -> str | None:
+    """Read `backend.model` defensively. GA's `agent.llmclients` can
+    contain plain dicts on bad mixin config (see agentmain.py:94), and
+    MixinSession's backend doesn't expose `.model`. Either path → None,
+    which `_simplify_llm_name` handles by falling through to prettify.
+    """
+    backend = getattr(client, "backend", None)
+    if backend is None:
+        return None
+    model = getattr(backend, "model", None)
+    return model if isinstance(model, str) and model else None
 
 
 # Keyword patterns for hint inference. Match in order; first hit wins.
@@ -612,12 +651,21 @@ class Bridge:
         """Snapshot the agent's LLM list for the Composer LLM switcher."""
         out: list[dict[str, Any]] = []
         try:
+            clients = list(getattr(self.agent, "llmclients", []) or [])
+        except Exception:
+            clients = []
+        try:
             for index, name, is_current in self.agent.list_llms():
+                model = (
+                    _safe_get_model(clients[index])
+                    if index < len(clients)
+                    else None
+                )
                 out.append(
                     {
                         "index": index,
                         "name": name,
-                        "displayName": _simplify_llm_name(name),
+                        "displayName": _simplify_llm_name(name, model),
                         "isCurrent": bool(is_current),
                     }
                 )
@@ -1024,12 +1072,13 @@ class Bridge:
             )
             return
         raw_name = self.agent.get_llm_name()
+        model = _safe_get_model(getattr(self.agent, "llmclient", None))
         self._emit(
             LLMChangedEvent(
                 sessionId=self.session_id,
                 index=cmd.llmIndex,
                 name=raw_name,
-                displayName=_simplify_llm_name(raw_name),
+                displayName=_simplify_llm_name(raw_name, model),
             )
         )
 

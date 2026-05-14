@@ -2,6 +2,7 @@ import * as Dialog from "@radix-ui/react-dialog";
 import { X as XIcon } from "@phosphor-icons/react";
 import { useEffect, useRef, useState } from "react";
 
+import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
 export interface CreateProjectDialogProps {
@@ -116,24 +117,12 @@ export function CreateProjectDialog({
             </Field>
 
             <div className="flex justify-end gap-2 pt-1">
-              <button
-                type="button"
-                onClick={() => onOpenChange(false)}
-                className="rounded-sm border border-line bg-elevated px-3.5 py-1.5 text-[12.5px] text-ink transition-colors hover:bg-hover"
-              >
+              <Button variant="secondary" onClick={() => onOpenChange(false)}>
                 取消
-              </button>
-              <button
-                type="submit"
-                disabled={!canSubmit}
-                className={cn(
-                  "rounded-sm border border-brand-strong bg-brand-strong px-3.5 py-1.5 text-[12.5px] font-medium text-elevated",
-                  "transition-colors hover:bg-brand-strong/90",
-                  "disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-brand-strong",
-                )}
-              >
+              </Button>
+              <Button type="submit" disabled={!canSubmit}>
                 创建
-              </button>
+              </Button>
             </div>
           </form>
         </Dialog.Content>

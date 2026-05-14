@@ -37,7 +37,7 @@ export function SettingsAbout({
           Galley
         </h2>
         <p className="mt-1 font-serif text-[14px] italic text-ink-soft">
-          多对话 AI agent 的本地桌面工作台。
+          GenericAgent 的本地桌面工作台
         </p>
       </div>
 

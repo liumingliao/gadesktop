@@ -6,6 +6,7 @@ import {
 } from "@phosphor-icons/react";
 import { useEffect, useRef, useState } from "react";
 
+import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import type { Project } from "@/types/session";
 
@@ -139,39 +140,24 @@ export function EditProjectDialog({
             </Field>
 
             <div className="flex justify-end gap-2 pt-1">
-              <button
-                type="button"
-                onClick={onClose}
-                className="rounded-sm border border-line bg-elevated px-3.5 py-1.5 text-[12.5px] text-ink transition-colors hover:bg-hover"
-              >
+              <Button variant="secondary" onClick={onClose}>
                 取消
-              </button>
-              <button
-                type="submit"
-                disabled={!canSubmit}
-                className={cn(
-                  "rounded-sm border border-brand-strong bg-brand-strong px-3.5 py-1.5 text-[12.5px] font-medium text-elevated",
-                  "transition-colors hover:bg-brand-strong/90",
-                  "disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-brand-strong",
-                )}
-              >
+              </Button>
+              <Button type="submit" disabled={!canSubmit}>
                 保存
-              </button>
+              </Button>
             </div>
           </form>
 
           <div className="mt-5 border-t border-line pt-4">
-            <button
-              type="button"
+            <Button
+              variant="destructive-soft"
+              size="sm"
               onClick={() => project && onRequestDelete(project)}
-              className={cn(
-                "inline-flex items-center gap-1.5 rounded-sm border border-error/30 bg-error/[0.06] px-2.5 py-1 text-[12px] font-medium text-error",
-                "transition-colors hover:bg-error/[0.12]",
-              )}
+              leadingIcon={<Trash size={12} weight="thin" />}
             >
-              <Trash size={12} weight="thin" />
               删除项目
-            </button>
+            </Button>
             <span className="ml-2 text-[11px] text-ink-muted">
               里面的对话不会被删除，自动解绑回时间线
             </span>

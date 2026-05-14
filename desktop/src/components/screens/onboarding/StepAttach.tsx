@@ -2,6 +2,7 @@ import {
   ArrowLeft,
   ArrowRight,
   ArrowSquareOut,
+  BookOpen,
   Check,
   CircleNotch,
   FolderOpen,
@@ -10,6 +11,7 @@ import {
 } from "@phosphor-icons/react";
 
 import { cn } from "@/lib/utils";
+import type { TutorialId } from "@/lib/onboarding-tutorials";
 
 export type PathValidation =
   | { kind: "ok"; foundAgentmain: boolean; rawPath: string }
@@ -25,6 +27,12 @@ interface StepAttachProps {
   onPickFolder: () => void;
   onBack: () => void;
   onContinue: () => void;
+  /**
+   * Open a tutorial modal — surfaced under the ValidationLine when
+   * the path check fails with a known fix-it path. Onboarding wires
+   * this to its activeTutorial state.
+   */
+  onShowTutorial?: (id: TutorialId) => void;
 }
 
 /**
@@ -46,13 +54,26 @@ export function StepAttach({
   onPickFolder,
   onBack,
   onContinue,
+  onShowTutorial,
 }: StepAttachProps) {
   const ready = validation?.kind === "ok";
+  const tutorialForFailure: TutorialId | null =
+    validation?.kind === "not-found"
+      ? "download-ga"
+      : validation?.kind === "missing-agentmain"
+        ? "wrong-directory"
+        : null;
+  const tutorialLabel =
+    tutorialForFailure === "download-ga"
+      ? "查看教程：下载 GA"
+      : tutorialForFailure === "wrong-directory"
+        ? "查看教程：选对 GA 目录"
+        : null;
 
   return (
     <div className="max-w-[580px]">
       <h1 className="m-0 font-serif text-[32px] font-medium leading-tight tracking-[0.005em] text-ink">
-        Attach 已安装的 GenericAgent
+        接入已经安装的 GenericAgent
       </h1>
       <p className="mb-7 mt-2.5 font-serif text-[15.5px] italic leading-[1.55] text-ink-soft">
         指向你本地的 GA 安装目录 · Galley 会用它启动 GA。
@@ -84,15 +105,28 @@ export function StepAttach({
         <ValidationLine validation={validation} />
       </div>
 
-      <a
-        href="https://github.com/lsdefine/GenericAgent"
-        target="_blank"
-        rel="noreferrer"
-        className="mt-1 inline-flex items-center gap-1 text-[12px] text-ink-muted transition-colors hover:text-brand-strong"
-      >
-        还没装 GenericAgent？前往安装
-        <ArrowSquareOut size={11} weight="thin" />
-      </a>
+      {tutorialForFailure && tutorialLabel && onShowTutorial && (
+        <button
+          type="button"
+          onClick={() => onShowTutorial(tutorialForFailure)}
+          className="mt-1 inline-flex items-center gap-1.5 rounded-sm border border-line px-2.5 py-1 text-[12px] font-medium text-brand-strong transition-colors hover:border-brand hover:bg-brand-soft hover:text-ink"
+        >
+          <BookOpen size={11} weight="thin" />
+          {tutorialLabel}
+        </button>
+      )}
+
+      {!tutorialForFailure && (
+        <a
+          href="https://github.com/lsdefine/GenericAgent"
+          target="_blank"
+          rel="noreferrer"
+          className="mt-1 inline-flex items-center gap-1 text-[12px] text-ink-muted transition-colors hover:text-brand-strong"
+        >
+          还没装 GenericAgent？前往安装
+          <ArrowSquareOut size={11} weight="thin" />
+        </a>
+      )}
 
       <div className="mt-9 flex items-center gap-2">
         <button

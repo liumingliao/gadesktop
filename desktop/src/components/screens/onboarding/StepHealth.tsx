@@ -1,4 +1,9 @@
-import { ArrowLeft, ArrowRight, Info } from "@phosphor-icons/react";
+import {
+  ArrowClockwise,
+  ArrowLeft,
+  ArrowRight,
+  Info,
+} from "@phosphor-icons/react";
 
 import { HealthCheckCard } from "@/components/health-check/HealthCheckCard";
 import { cn } from "@/lib/utils";
@@ -9,9 +14,16 @@ interface StepHealthProps {
   onBack: () => void;
   onContinue: () => void;
   /**
-   * Action handler for failed-row inline buttons. The Onboarding
-   * controller maps action ids back to specific behaviors (open
-   * docs, change path, retry).
+   * Re-run the health checks against the current path. Surfaced as a
+   * "重新检查" button next to Back when not all checks have passed —
+   * lets the user fix files externally (e.g. create mykey.py) and
+   * re-verify without going Back → Continue to re-enter the step.
+   */
+  onRetry?: () => void;
+  /**
+   * Action handler for failed/warning-row inline buttons. The
+   * Onboarding controller maps action ids back to specific behaviors
+   * (open tutorial modal, change path, etc).
    */
   onItemAction?: (item: HealthCheckItem, action: string) => void;
   itemActions?: Record<string, { id: string; label: string }[]>;
@@ -33,11 +45,15 @@ export function StepHealth({
   items,
   onBack,
   onContinue,
+  onRetry,
   onItemAction,
   itemActions,
 }: StepHealthProps) {
   const allPassed =
     items.length > 0 && items.every((c) => c.state === "success");
+  const settled =
+    items.length > 0 &&
+    items.every((c) => c.state !== "pending" && c.state !== "running");
 
   return (
     <div className="max-w-[580px]">
@@ -76,6 +92,16 @@ export function StepHealth({
           <ArrowLeft size={13} weight="thin" />
           Back
         </button>
+        {onRetry && settled && !allPassed && (
+          <button
+            type="button"
+            onClick={onRetry}
+            className="inline-flex items-center gap-1.5 rounded-sm border border-line px-3 py-1.5 text-[12.5px] text-ink-soft transition-colors hover:border-brand hover:bg-brand-soft hover:text-ink"
+          >
+            <ArrowClockwise size={12} weight="thin" />
+            重新检查
+          </button>
+        )}
         <button
           type="button"
           onClick={onContinue}
