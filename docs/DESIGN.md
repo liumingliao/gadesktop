@@ -355,10 +355,12 @@ Turn 2                                           ← 自带 mt-7 (28px) 的 chap
 |---|---|---|
 | 字体 | Inter 500 | Newsreader 400 |
 | 字重 | medium | regular |
-| 锚点 | 左侧 2px 灰竖条 | 无 |
+| 锚点 | 左侧 3px 杏沙竖条 + 杏沙底 `bg-brand-soft` + 右侧 6px 圆角 | 无 |
 | 对齐 | 左对齐 | 左对齐 |
 
-不要 right-align 不要气泡 —— 这是文档区，不是聊天 IM。
+不要 right-align 不要气泡 —— 这是文档区，不是聊天 IM。**用户消息是 callout 块，不是 bubble**：全宽对齐、左强边线、轻底色——参照 Markdown blockquote / Notion callout 的文档语法，而非 IM 单侧浮起。
+
+长对话里这是用户**回找自己提问**的主视觉锚——杏沙底 + 品牌竖线让每个 user turn 成为滚动停靠点。AI 回复保持纯散文无底色，"提问（高亮锚）→ AI 回复（要读的内容）" 的层次随之建立。
 
 #### Thinking Summary
 
