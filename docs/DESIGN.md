@@ -1022,6 +1022,7 @@ YOLO = "You Only Live Once"。
 | `Shift+Enter` | Composer 换行 |
 | `↑ / ↓` | Palette 选项 |
 | `Tab` | Palette 进二级 |
+| `⌥↑ / ⌥↓` | 跳到对话中上 / 下一条用户提问（焦点在 Composer 时不生效） |
 
 ---
 

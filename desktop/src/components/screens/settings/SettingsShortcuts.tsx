@@ -41,6 +41,16 @@ const GROUPS: ShortcutGroup[] = [
     ],
   },
   {
+    title: "Conversation",
+    rows: [
+      {
+        combo: "⌥↑ / ⌥↓",
+        action: "跳到上 / 下一条提问",
+        note: "焦点在 Composer 时不生效（macOS 文本编辑原生快捷键保留）",
+      },
+    ],
+  },
+  {
     title: "Overlays",
     rows: [
       { combo: "Esc", action: "关闭当前 overlay 或退出 inline edit" },
