@@ -71,8 +71,11 @@ pub fn run() {
                 window
                     .set_decorations(false)
                     .expect("failed to disable native decorations on Windows");
-                set_shadows(&window, true)
-                    .expect("failed to enable drop shadow on Windows");
+                // window-shadows-v2 0.1.1: `set_shadows(&mut App, bool)`
+                // — takes the App handle (not a window) and returns
+                // unit `()`. Internally it iterates the app's windows
+                // and applies DWM shadow to each.
+                set_shadows(_app, true);
             }
 
             // macOS-only top menu bar. On macOS apps that don't install
