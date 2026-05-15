@@ -3,7 +3,7 @@ name: Release
 # Tag-triggered release. Push a tag matching `v*` (e.g. `v0.2.0`) on main
 # to fire this workflow. It produces two artifacts in parallel:
 #
-#   - Galley_<version>_aarch64.dmg    (Apple Silicon Mac, macos-26 runner)
+#   - Galley_<version>_aarch64.dmg    (Apple Silicon Mac, macos-15 runner)
 #   - Galley_<version>_x64-setup.exe  (Windows,           windows-latest runner)
 #
 # Mac Intel (x86_64-apple-darwin) was dropped from the matrix in
@@ -13,12 +13,17 @@ name: Release
 # docs/release-workflow.md §"Intel runner deprecation"). Re-add the
 # matrix row if/when a sizable user base needs official Intel binaries.
 #
-# macOS runner is macos-26 (Tahoe) as of v0.1.0-alpha.3: macos-14
-# (Sonoma) began GitHub-hosted deprecation 2026-07-06 with full
-# unsupport by 2026-11-02. macos-15 (Sequoia) is the conservative step
-# but Apple has shifted to year-named releases, and macos-26 has the
-# longest runway before its own deprecation. Bumps stay in this single
-# CI-maintenance commit cycle along with the Node 24 action upgrades.
+# macOS runner is macos-15 (Sequoia) as of the v0.1.0-alpha.2 CI
+# maintenance: macos-14 (Sonoma) begins GitHub-hosted deprecation
+# 2026-07-06 with full unsupport by 2026-11-02. A first attempt at
+# macos-26 (Tahoe) hit a PATH/Rust-toolchain conflict — macos-26
+# pre-installs Rust 1.95.0 + rustup, and `dtolnay/rust-toolchain@
+# stable`'s setup ends up with `cargo` resolving to a `rustup-init`
+# shim instead of the real cargo, so `cargo check` errors with
+# "unexpected argument 'check' found". macos-15 has been GA for
+# months and works cleanly with our existing Rust setup. Revisit
+# macos-26 once dtolnay/rust-toolchain catches up (or we move to
+# system Rust on the runner).
 #
 # After both build, a final job collects them and creates a DRAFT
 # GitHub Release. JC reviews the auto-generated notes, smoke-tests each
@@ -49,7 +54,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - platform: macos-26
+          - platform: macos-15
             target: aarch64-apple-darwin
             arch: aarch64
             bundle_dir: dmg
