@@ -1,3 +1,4 @@
+import { listen } from "@tauri-apps/api/event";
 import { useEffect, useMemo, useState } from "react";
 
 import { ToastHost } from "@/components/error-card/ToastHost";
@@ -181,6 +182,52 @@ function App() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [togglePalette, setSettingsOpen, setScreen]);
+
+  // macOS menubar bridge: src-tauri/src/lib.rs installs a native menu
+  // on Mac that emits `menu:<id>` events. We subscribe and route each
+  // to the same store action the keyboard shortcut would trigger.
+  //
+  // On Win/Linux there's no menu installed → these events never fire,
+  // the subscription sits idle (cheap, no overhead). Keeping it
+  // unconditional avoids importing isMac into this file just for a
+  // micro-optimization.
+  //
+  // No double-fire with the keydown handler above: AppKit consumes
+  // menu accelerators (Cmd+, / Cmd+N) before the webview sees them
+  // when a menu has them bound, so the keydown listener doesn't run
+  // on Mac for accelerator-bound keys. Win has no menu so keydown
+  // remains the only path there.
+  useEffect(() => {
+    let cancelled = false;
+    const unlisteners: Array<() => void> = [];
+
+    const handlers: Array<[string, () => void]> = [
+      ["menu:settings", () => setSettingsOpen(true)],
+      ["menu:new_chat", () => setScreen("empty")],
+      ["menu:width_compact", () => {
+        void setConversationWidth("compact");
+      }],
+      ["menu:width_wide", () => {
+        void setConversationWidth("wide");
+      }],
+    ];
+
+    void (async () => {
+      for (const [event, handler] of handlers) {
+        const fn = await listen(event, handler);
+        if (cancelled) {
+          fn();
+        } else {
+          unlisteners.push(fn);
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      unlisteners.forEach((fn) => fn());
+    };
+  }, [setSettingsOpen, setScreen, setConversationWidth]);
 
   // Conversation source-of-truth precedence:
   //   1. store.turns + store.pendingApprovals — populated by IPC

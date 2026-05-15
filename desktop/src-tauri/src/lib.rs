@@ -74,6 +74,195 @@ pub fn run() {
                 set_shadow(&window, true)
                     .expect("failed to enable drop shadow on Windows");
             }
+
+            // macOS-only top menu bar. On macOS apps that don't install
+            // a menu look "half-native" — the menu bar shows generic
+            // Tauri default entries. We install a Galley-specific menu
+            // that mirrors the in-app actions (Settings / New Chat /
+            // Conversation Width) plus standard system items
+            // (Hide / Quit / Cut / Copy / Paste / Minimize / Zoom).
+            //
+            // Custom menu items emit `menu:<id>` events; App.tsx
+            // listens and routes them to the same store actions the
+            // keyboard shortcuts already trigger. Predefined items
+            // (Quit / Hide / Copy / etc.) are handled by the OS
+            // directly and need no JS wiring.
+            //
+            // Win/Linux don't get a menu — Win uses our custom chrome
+            // (decorations off, no native menu bar surface) and Linux
+            // isn't a v0.2 target. Users on those platforms reach the
+            // same actions through TopBar buttons / keyboard / Command
+            // Palette.
+            #[cfg(target_os = "macos")]
+            {
+                use tauri::menu::{
+                    AboutMetadataBuilder, MenuBuilder, MenuItemBuilder,
+                    PredefinedMenuItem, SubmenuBuilder,
+                };
+
+                let about_metadata = AboutMetadataBuilder::new()
+                    .name(Some("Galley"))
+                    .version(Some(env!("CARGO_PKG_VERSION")))
+                    .credits(Some("Made by wangjc683".to_string()))
+                    .website(Some("https://github.com/wangjc683/galley".to_string()))
+                    .website_label(Some("GitHub".to_string()))
+                    .build();
+
+                let app_submenu = SubmenuBuilder::new(_app, "Galley")
+                    .item(&PredefinedMenuItem::about(
+                        _app,
+                        Some("About Galley"),
+                        Some(about_metadata),
+                    )?)
+                    .separator()
+                    .item(
+                        &MenuItemBuilder::new("Settings…")
+                            .id("settings")
+                            .accelerator("Cmd+,")
+                            .build(_app)?,
+                    )
+                    .separator()
+                    .item(&PredefinedMenuItem::hide(_app, None)?)
+                    .item(&PredefinedMenuItem::hide_others(_app, None)?)
+                    .item(&PredefinedMenuItem::show_all(_app, None)?)
+                    .separator()
+                    .item(&PredefinedMenuItem::quit(_app, None)?)
+                    .build()?;
+
+                let file_submenu = SubmenuBuilder::new(_app, "File")
+                    .item(
+                        &MenuItemBuilder::new("New Chat")
+                            .id("new_chat")
+                            .accelerator("Cmd+N")
+                            .build(_app)?,
+                    )
+                    .separator()
+                    .item(&PredefinedMenuItem::close_window(_app, None)?)
+                    .build()?;
+
+                let edit_submenu = SubmenuBuilder::new(_app, "Edit")
+                    .item(&PredefinedMenuItem::undo(_app, None)?)
+                    .item(&PredefinedMenuItem::redo(_app, None)?)
+                    .separator()
+                    .item(&PredefinedMenuItem::cut(_app, None)?)
+                    .item(&PredefinedMenuItem::copy(_app, None)?)
+                    .item(&PredefinedMenuItem::paste(_app, None)?)
+                    .item(&PredefinedMenuItem::select_all(_app, None)?)
+                    .separator()
+                    // Find: V0.2 will wire to in-conversation search.
+                    // Disabled in v0.1 so the shortcut shows but click
+                    // is a no-op (same treatment as Toggle Sidebar).
+                    .item(
+                        &MenuItemBuilder::new("Find")
+                            .id("find")
+                            .accelerator("Cmd+F")
+                            .enabled(false)
+                            .build(_app)?,
+                    )
+                    .build()?;
+
+                let width_submenu = SubmenuBuilder::new(_app, "Conversation Width")
+                    .item(
+                        &MenuItemBuilder::new("Compact (760px)")
+                            .id("width_compact")
+                            .build(_app)?,
+                    )
+                    .item(
+                        &MenuItemBuilder::new("Wide (1200px)")
+                            .id("width_wide")
+                            .build(_app)?,
+                    )
+                    .build()?;
+
+                let view_submenu = SubmenuBuilder::new(_app, "View")
+                    // Toggle Sidebar: V0.1 placeholder — wiring lands
+                    // in V0.2. Disabled so the shortcut shows but click
+                    // is a no-op (consistent with Find).
+                    .item(
+                        &MenuItemBuilder::new("Toggle Sidebar")
+                            .id("toggle_sidebar")
+                            .accelerator("Cmd+\\")
+                            .enabled(false)
+                            .build(_app)?,
+                    )
+                    .item(&width_submenu)
+                    .build()?;
+
+                let window_submenu = SubmenuBuilder::new(_app, "Window")
+                    .item(&PredefinedMenuItem::minimize(_app, None)?)
+                    .item(&PredefinedMenuItem::maximize(_app, Some("Zoom"))?)
+                    .separator()
+                    .item(&PredefinedMenuItem::bring_all_to_front(_app, None)?)
+                    .build()?;
+
+                let help_submenu = SubmenuBuilder::new(_app, "Help")
+                    .item(
+                        &MenuItemBuilder::new("Galley on GitHub")
+                            .id("github")
+                            .build(_app)?,
+                    )
+                    .item(
+                        &MenuItemBuilder::new("Report a Bug")
+                            .id("issues")
+                            .build(_app)?,
+                    )
+                    .build()?;
+
+                let menu = MenuBuilder::new(_app)
+                    .item(&app_submenu)
+                    .item(&file_submenu)
+                    .item(&edit_submenu)
+                    .item(&view_submenu)
+                    .item(&window_submenu)
+                    .item(&help_submenu)
+                    .build()?;
+
+                _app.set_menu(menu)?;
+
+                _app.on_menu_event(|app, event| {
+                    use tauri::Emitter;
+                    use tauri_plugin_opener::OpenerExt;
+                    match event.id.0.as_str() {
+                        // Custom in-app actions — emit; App.tsx routes
+                        // to the same store action the keyboard
+                        // shortcut would trigger.
+                        "settings" => {
+                            let _ = app.emit("menu:settings", ());
+                        }
+                        "new_chat" => {
+                            let _ = app.emit("menu:new_chat", ());
+                        }
+                        "width_compact" => {
+                            let _ = app.emit("menu:width_compact", ());
+                        }
+                        "width_wide" => {
+                            let _ = app.emit("menu:width_wide", ());
+                        }
+                        // External links — open in system browser
+                        // server-side so we don't round-trip through
+                        // JS. tauri-plugin-opener is already loaded.
+                        "github" => {
+                            let _ = app.opener().open_url(
+                                "https://github.com/wangjc683/galley",
+                                None::<&str>,
+                            );
+                        }
+                        "issues" => {
+                            let _ = app.opener().open_url(
+                                "https://github.com/wangjc683/galley/issues",
+                                None::<&str>,
+                            );
+                        }
+                        // "find" and "toggle_sidebar" are disabled in
+                        // v0.1; click never fires. Predefined items
+                        // (quit / hide / copy / paste / undo / redo /
+                        // minimize / maximize / etc.) are handled by
+                        // AppKit directly and never reach this match.
+                        _ => {}
+                    }
+                });
+            }
+
             Ok(())
         })
         .run(tauri::generate_context!())
