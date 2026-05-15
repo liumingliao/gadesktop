@@ -728,6 +728,14 @@ function App() {
         onChangeGAPath={() => {
           void pickGAPath(setGAConfig);
         }}
+        onCommitGAPath={async (path) => {
+          // Manual-typed GA path from Settings → Runtime. The
+          // SettingsRuntime field has already validated and refuses to
+          // call this on `not-found`; we trust it here. setGAConfig
+          // shows the same "重启 Galley 才能生效" toast as the picker
+          // flow, keeping both entry points symmetric.
+          await setGAConfig({ gaPath: path });
+        }}
         // Bridge Python picker intentionally not wired — V0.1 relies
         // on the python probe to pick the interpreter; advanced users
         // edit prefs / capabilities by hand. Settings just shows the

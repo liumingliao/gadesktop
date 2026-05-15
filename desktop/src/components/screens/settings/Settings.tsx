@@ -46,6 +46,7 @@ export interface SettingsProps {
   onChangeGAPath?: () => void;
   onChangeBridgePython?: () => void;
   onReRunHealthCheck?: () => void;
+  onCommitGAPath?: (path: string) => Promise<void>;
 }
 
 /**
@@ -82,6 +83,7 @@ export function Settings({
   onChangeGAPath,
   onChangeBridgePython,
   onReRunHealthCheck,
+  onCommitGAPath,
 }: SettingsProps) {
   const [tab, setTab] = useState<SettingsTab>(defaultTab);
 
@@ -116,6 +118,7 @@ export function Settings({
                   onChangeGAPath={onChangeGAPath}
                   onChangeBridgePython={onChangeBridgePython}
                   onReRunHealthCheck={onReRunHealthCheck}
+                  onCommitGAPath={onCommitGAPath}
                 />
               )}
               {tab === "approval" && (
