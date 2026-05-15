@@ -33,26 +33,39 @@ import { cn } from "@/lib/utils";
  */
 export function WindowControls() {
   const [maximized, setMaximized] = useState(false);
+  const [focused, setFocused] = useState(true);
   const [appWindow, setAppWindow] = useState<Window | null>(null);
 
   useEffect(() => {
-    let unlisten: (() => void) | undefined;
     let cancelled = false;
+    const unlisteners: Array<() => void> = [];
 
     void (async () => {
       try {
         const win = getCurrentWindow();
         if (cancelled) return;
         setAppWindow(win);
-        const initial = await win.isMaximized();
-        if (!cancelled) setMaximized(initial);
-        const fn = await win.onResized(() => {
+
+        const initialMaximized = await win.isMaximized();
+        if (!cancelled) setMaximized(initialMaximized);
+
+        const resizeFn = await win.onResized(() => {
           void win.isMaximized().then((m) => {
             if (!cancelled) setMaximized(m);
           });
         });
-        if (cancelled) fn();
-        else unlisten = fn;
+        if (cancelled) resizeFn();
+        else unlisteners.push(resizeFn);
+
+        // Win convention: chrome desaturates when the window loses
+        // focus. Initial state defaults to `true` since the window is
+        // virtually always focused at mount; the listener corrects it
+        // the first time focus actually shifts.
+        const focusFn = await win.onFocusChanged(({ payload }) => {
+          if (!cancelled) setFocused(payload);
+        });
+        if (cancelled) focusFn();
+        else unlisteners.push(focusFn);
       } catch {
         // Non-Tauri host or permission denied — buttons will render
         // but on-click calls below short-circuit when appWindow is null.
@@ -61,12 +74,17 @@ export function WindowControls() {
 
     return () => {
       cancelled = true;
-      unlisten?.();
+      unlisteners.forEach((fn) => fn());
     };
   }, []);
 
   return (
-    <div className="flex shrink-0 items-stretch">
+    <div
+      className={cn(
+        "flex shrink-0 items-stretch transition-opacity duration-150",
+        !focused && "opacity-50",
+      )}
+    >
       <ControlButton
         ariaLabel="最小化"
         onClick={() => void appWindow?.minimize()}
