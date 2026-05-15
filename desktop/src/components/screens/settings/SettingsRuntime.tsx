@@ -5,7 +5,6 @@ import {
   Info,
 } from "@phosphor-icons/react";
 
-import { HealthCheckCard } from "@/components/health-check/HealthCheckCard";
 import { cn } from "@/lib/utils";
 import type { RuntimeInfo } from "@/types/inspector";
 
@@ -47,14 +46,14 @@ export function SettingsRuntime({
       <PathField
         label="Python"
         value={info.pythonVersion}
-        // Picker intentionally not wired — Tauri's shell:allow-spawn
-        // capability only permits the `python3` / `python` aliases
-        // (resolved via PATH). A self-picked absolute path would be
-        // rejected at spawn time. To use a non-PATH interpreter,
-        // edit src-tauri/capabilities/default.json.
+        // Picker intentionally not wired in V0.1 — the auto-probe
+        // (lib/python-probe.ts) picks an interpreter from a pre-
+        // approved list at Onboarding. Settings shows the resolved
+        // path; "Re-run health check" below re-probes when the venv
+        // changes (broken upgrade, switched Python version, etc.).
         onPick={onChangeBridgePython}
         readOnly
-        hint="使用系统默认的 python3 · 自定义路径需手动编辑 Galley 配置文件"
+        hint="探测到的可用 Python 路径 · 改变后点下方 Re-run 即可重新探测"
       />
 
       <GAVersionCard
@@ -65,20 +64,17 @@ export function SettingsRuntime({
 
       <div>
         <SubLabel>Health Check</SubLabel>
-        <div className="mt-2">
-          <HealthCheckCard
-            items={info.healthChecks}
-            variant="standalone"
-            showFooter={false}
-          />
-        </div>
+        <p className="mt-2 text-[12.5px] leading-[1.55] text-ink-soft">
+          不知道哪儿出问题了？跑一次完整体检 ——
+          重新探测 Python 解释器、检查 GA 路径和必要文件。
+        </p>
         <button
           type="button"
           onClick={onReRunHealthCheck}
           className="mt-3 inline-flex items-center gap-1.5 rounded-sm border border-line bg-elevated px-3 py-1.5 text-[12.5px] font-medium text-ink-soft transition-colors hover:border-brand hover:bg-brand-soft hover:text-ink"
         >
           <ArrowsClockwise size={13} weight="thin" />
-          Re-run health check
+          跑一次 Health Check
         </button>
       </div>
 

@@ -27,6 +27,13 @@ interface StepHealthProps {
    */
   onItemAction?: (item: HealthCheckItem, action: string) => void;
   itemActions?: Record<string, { id: string; label: string }[]>;
+  /** Override "Back" button label. Used by the Settings revisit flow
+   * to relabel as "取消" (since there's no Attach step to go back to —
+   * Back is really cancellation). Default: "Back". */
+  backLabel?: string;
+  /** Override "进入 Galley" button label. Used by Settings revisit
+   * flow to relabel as "返回 Settings". Default: "进入 Galley". */
+  continueLabel?: string;
 }
 
 /**
@@ -48,6 +55,8 @@ export function StepHealth({
   onRetry,
   onItemAction,
   itemActions,
+  backLabel = "Back",
+  continueLabel = "进入 Galley",
 }: StepHealthProps) {
   const allPassed =
     items.length > 0 && items.every((c) => c.state === "success");
@@ -90,7 +99,7 @@ export function StepHealth({
           className="inline-flex items-center gap-1.5 rounded-sm px-3 py-1.5 text-[13px] text-ink-soft transition-colors hover:bg-hover hover:text-ink"
         >
           <ArrowLeft size={13} weight="thin" />
-          Back
+          {backLabel}
         </button>
         {onRetry && settled && !allPassed && (
           <button
@@ -111,7 +120,7 @@ export function StepHealth({
             "disabled:cursor-not-allowed disabled:opacity-40",
           )}
         >
-          进入 Galley
+          {continueLabel}
           <ArrowRight size={13} weight="bold" />
         </button>
       </div>

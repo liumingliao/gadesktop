@@ -324,6 +324,18 @@ function App() {
   );
   // ConfirmDeleteProject dialog — opens from inside EditProject when
   // the user clicks "删除 Project". Same null-or-project pattern.
+  // Health Check revisit flow (Settings → Re-run Health Check):
+  //   - true → Onboarding renders in "revisit" mode (skips Welcome /
+  //     Attach, jumps to Health step, swaps button labels)
+  //   - previousScreen remembers where the user was before triggering
+  //     the revisit, so onComplete / onCancel can return them there +
+  //     re-open Settings (the action itself was triggered from inside
+  //     the Settings dialog, so "where I was" implicitly includes
+  //     "with Settings open").
+  const [healthCheckRevisit, setHealthCheckRevisit] = useState(false);
+  const [revisitReturnScreen, setRevisitReturnScreen] =
+    useState<import("@/stores/useAppStore").Screen>("empty");
+
   const [deletingProjectId, setDeletingProjectId] = useState<string | null>(
     null,
   );
@@ -338,14 +350,34 @@ function App() {
     return (
       <>
         <Onboarding
-          onComplete={(gaPath) => {
-            // Persist the validated path so subsequent bridge spawns
-            // use the user-chosen GA install, not the demo fallback.
-            // Best-effort: setGAConfig pushes a "重启 Workbench"
-            // toast on success — fine for onboarding since there's
-            // no bridge alive yet.
-            void setGAConfig({ gaPath });
-            setScreen("empty");
+          mode={healthCheckRevisit ? "revisit" : "fresh"}
+          initialPath={healthCheckRevisit ? gaConfig.gaPath : undefined}
+          onComplete={(gaPath, pythonAlias) => {
+            // Persist the validated path + the probed Python alias so
+            // subsequent bridge spawns use the right interpreter, not
+            // the demo fallback (system python3 in a packaged build
+            // has no GA deps — silent crash).
+            const partial: { gaPath: string; python?: string } = { gaPath };
+            if (pythonAlias) partial.python = pythonAlias;
+            void setGAConfig(partial);
+            if (healthCheckRevisit) {
+              // Settings → "跑一次 Health Check" round-trip: return the
+              // user to the screen they came from + re-open the
+              // Settings dialog where they clicked.
+              setHealthCheckRevisit(false);
+              setScreen(revisitReturnScreen);
+              setSettingsOpen(true);
+            } else {
+              setScreen("empty");
+            }
+          }}
+          onCancel={() => {
+            // Revisit-only escape hatch. setGAConfig is intentionally
+            // skipped — the user bailed without committing to a new
+            // probe result, so we keep whatever was saved before.
+            setHealthCheckRevisit(false);
+            setScreen(revisitReturnScreen);
+            setSettingsOpen(true);
           }}
         />
         {import.meta.env.DEV && (
@@ -696,12 +728,22 @@ function App() {
         onChangeGAPath={() => {
           void pickGAPath(setGAConfig);
         }}
-        // Bridge Python picker intentionally not wired — Tauri's
-        // shell:allow-spawn only permits `python3` / `python` aliases.
-        // SettingsRuntime renders that field read-only for V0.1.
-        onReRunHealthCheck={() =>
-          console.info("[settings] re-run health check")
-        }
+        // Bridge Python picker intentionally not wired — V0.1 relies
+        // on the python probe to pick the interpreter; advanced users
+        // edit prefs / capabilities by hand. Settings just shows the
+        // resolved path.
+        //
+        // "跑一次 Health Check" routes back through Onboarding's
+        // StepHealth in revisit mode (skips Welcome / Attach). One
+        // canonical health-check UX instead of a divergent inline
+        // copy in Settings — see Settings-Health-Check devlog
+        // 2026-05-15.
+        onReRunHealthCheck={() => {
+          setRevisitReturnScreen(screen);
+          setSettingsOpen(false);
+          setHealthCheckRevisit(true);
+          setScreen("onboarding");
+        }}
       />
 
       <ArchivedDialog

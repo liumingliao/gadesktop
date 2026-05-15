@@ -23,7 +23,8 @@ export type TutorialId =
   | "wrong-directory"
   | "mykey-setup"
   | "assets-missing"
-  | "memory-info";
+  | "memory-info"
+  | "python-missing-anthropic";
 
 export interface Tutorial {
   id: TutorialId;
@@ -143,6 +144,34 @@ git pull          # 拉最新
 完成后回到这里点 **重新检查**。`,
     upstreamUrl: HELLO_GA_BASE,
     upstreamLabel: "查看 §1.2 下载项目（Datawhale Hello GA）",
+  },
+
+  "python-missing-anthropic": {
+    id: "python-missing-anthropic",
+    title: "Python 加载 GA 失败",
+    body: `Galley 在常见路径上都没找到能 \`import agentmain\` 的 Python——通常意味着 GA 的依赖（\`requests\` / \`beautifulsoup4\` / \`bottle\` 等）没装到这些解释器上。
+
+**推荐方案：在 GA 目录创建专用 venv**
+
+\`\`\`bash
+cd ${EXAMPLE_GA_PATH}
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -e .
+\`\`\`
+
+\`pip install -e .\` 会按 \`pyproject.toml\` 装好 GA 的核心依赖。完成后回到 Galley 点 **重新检查** —— 我们会优先识别 GA 目录下的 \`.venv/bin/python\`。
+
+**如果你想用系统 Python**
+
+确保 GA 的依赖装到了你的某个常见 Python 上（Homebrew \`/usr/local/bin/python3\` / \`/opt/homebrew/bin/python3\`，或者 Python.org \`/Library/Frameworks/Python.framework/...\`）：
+
+\`\`\`bash
+# 例：Python.org 3.14
+/Library/Frameworks/Python.framework/Versions/3.14/bin/python3 -m pip install -e ${EXAMPLE_GA_PATH}
+\`\`\`
+
+> 为什么不直接用你终端的 \`python3\`？打包后的 Galley 从 Finder 启动时 PATH 跟你终端不一样，找不到 pyenv / uv / conda / asdf 管理的 Python。V0.2 会支持自定义路径。`,
   },
 
   "memory-info": {

@@ -55,6 +55,4 @@ export interface RuntimeInfo {
   gaBaseline: string;
   /** Workbench app version (e.g. "0.1.0"). */
   workbenchVersion: string;
-  /** Per-check breakdown for the embedded Health Check Card. */
-  healthChecks: HealthCheckItem[];
 }

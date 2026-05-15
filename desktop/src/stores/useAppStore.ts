@@ -63,6 +63,17 @@ import type { Project, Session } from "@/types/session";
  */
 const _bridgeClients = new Map<string, BridgeClient>();
 
+/**
+ * Per-session rolling buffer of the last few stderr lines. Used to
+ * surface "bridge died with this Python error" toasts on abnormal
+ * exit — without this, an ImportError on the bridge side just makes
+ * messages silently disappear (the prod-build failure mode we hit
+ * 2026-05-15 on first .dmg dogfood). Kept as a module-level Map (not
+ * Zustand state) because it's pure ephemeral diagnostic data — no
+ * rendering reacts to it. */
+const _stderrTails = new Map<string, string[]>();
+const _STDERR_TAIL_MAX = 8;
+
 export function getBridgeClient(sessionId: string): BridgeClient | null {
   return _bridgeClients.get(sessionId) ?? null;
 }
@@ -1952,16 +1963,24 @@ export const useAppStore = create<AppStore>((set, get) => ({
 
   setGAConfig: async (partial) => {
     const merged = { ...get().gaConfig, ...partial };
+    // Translate the python alias (Tauri shell-capability `name` like
+    // "python-framework-3-14") to its resolved display path for the
+    // Settings → Runtime "Python" field. Falls back to the raw alias
+    // for unknown values so Settings never shows an empty field.
+    const { findCandidateByAlias } = await import("@/lib/python-probe");
+    const displayCandidate = await findCandidateByAlias(merged.python);
+    const pythonDisplay = displayCandidate?.displayPath ?? merged.python;
     set((state) => ({
       gaConfig: merged,
       // Reflect into runtimeInfo so the Settings → Runtime tab and
       // Inspector → Runtime card show the new path immediately.
       // pythonVersion is intentionally repurposed to display the
-      // interpreter path — users see the path they picked.
+      // resolved interpreter path — users see where the bridge will
+      // spawn from, not the internal capability alias.
       runtimeInfo: {
         ...state.runtimeInfo,
         gaPath: merged.gaPath,
-        pythonVersion: merged.python,
+        pythonVersion: pythonDisplay,
       },
       // Reset the warmup flag so a new gaPath (or python interpreter)
       // re-triggers a one-shot LLM list refresh against the new
@@ -2409,10 +2428,42 @@ export const useAppStore = create<AppStore>((set, get) => ({
     try {
       const client = await spawnBridgeProcess(args, {
         onEvent: (event) => dispatchIPCEvent(event, useAppStore),
-        onStderr: (line) =>
-          console.warn(`[bridge ${sessionId} stderr]`, line),
+        onStderr: (line) => {
+          console.warn(`[bridge ${sessionId} stderr]`, line);
+          // Keep a rolling tail so onClose can show what went wrong.
+          const buf = _stderrTails.get(sessionId) ?? [];
+          buf.push(line);
+          if (buf.length > _STDERR_TAIL_MAX) buf.shift();
+          _stderrTails.set(sessionId, buf);
+        },
         onClose: (code, signal) => {
           console.info(`[bridge ${sessionId}] closed`, { code, signal });
+          // Abnormal exit → surface a toast with the last stderr lines
+          // so the user sees the real failure (ImportError, syntax
+          // error in mykey.py, etc.) instead of just "nothing
+          // happened". `code === 0` means graceful shutdown; null code
+          // with no signal means we shut it down ourselves via
+          // child.kill() — also not user-facing. Anything else is a
+          // real crash worth surfacing.
+          if (code !== 0 && code !== null) {
+            const tail = _stderrTails.get(sessionId) ?? [];
+            const message = tail.length
+              ? tail.slice(-3).join("\n")
+              : `Bridge exited with code ${code}`;
+            useAppStore.getState().pushToast(
+              makeAppError({
+                category: "bridge",
+                severity: "error",
+                title: "Bridge 进程崩溃",
+                message,
+                hint: null,
+                retryable: false,
+                context: `session ${sessionId}`,
+                traceback: tail.join("\n"),
+              }),
+            );
+          }
+          _stderrTails.delete(sessionId);
           _bridgeClients.delete(sessionId);
           // Drop from LRU regardless of why it closed — planned
           // shutdownBridge already removed it; crashes / external
@@ -2444,6 +2495,21 @@ export const useAppStore = create<AppStore>((set, get) => ({
               bridgeStatus: "error",
               bridgeError: msg,
             })),
+          );
+          // Spawn-time failures (binary missing, capability rejected,
+          // permission denied) — also worth a toast so the user sees
+          // something concrete instead of "the chat is just frozen".
+          useAppStore.getState().pushToast(
+            makeAppError({
+              category: "bridge",
+              severity: "error",
+              title: "Bridge 启动失败",
+              message: msg,
+              hint: null,
+              retryable: false,
+              context: `session ${sessionId}`,
+              traceback: null,
+            }),
           );
         },
         onMalformedLine: (line) =>
@@ -2665,9 +2731,12 @@ export const useAppStore = create<AppStore>((set, get) => ({
     } catch (e) {
       console.warn("[store] hydrateFromDB: llm_list pref load failed.", e);
     }
-    // GA spawn config (Stage 3 Task 4). Fall back to DEMO_GA_CONFIG in
-    // initial state when missing — first launch sees the demo path
-    // until the user opens Settings → Runtime and picks one.
+    // GA spawn config (Stage 3 Task 4). When `ga_config` pref is
+    // absent the user is fresh-from-install: route them to Onboarding
+    // so they can pick a GA path + run health checks (which probe for
+    // a Python interpreter that has GA's deps installed — see
+    // lib/python-probe.ts for why this matters in packaged builds).
+    let hasGAConfig = false;
     try {
       const saved = await getPref<{
         python: string;
@@ -2675,17 +2744,35 @@ export const useAppStore = create<AppStore>((set, get) => ({
         bridgeCwd: string;
       }>("ga_config");
       if (saved && saved.gaPath) {
+        hasGAConfig = true;
+        // Translate alias → display path for the Settings field, same
+        // as setGAConfig. See its comment for the rationale.
+        const { findCandidateByAlias } = await import(
+          "@/lib/python-probe"
+        );
+        const displayCandidate = await findCandidateByAlias(saved.python);
+        const pythonDisplay = displayCandidate?.displayPath ?? saved.python;
         set((state) => ({
           gaConfig: saved,
           runtimeInfo: {
             ...state.runtimeInfo,
             gaPath: saved.gaPath,
-            pythonVersion: saved.python,
+            pythonVersion: pythonDisplay,
           },
         }));
       }
     } catch (e) {
       console.warn("[store] hydrateFromDB: ga_config pref load failed.", e);
+    }
+    if (!hasGAConfig) {
+      // First launch — surface Onboarding. Skip the LLM warmup below:
+      // bridge spawn with the demo path would either succeed by
+      // accident (if the demo path happens to point at a real GA on
+      // this machine — dogfood case) or fail silently because the
+      // packaged-build `python3` PATH has no anthropic. Either way the
+      // user hasn't picked their real config yet, so warmup is noise.
+      set({ screen: "onboarding" });
+      return;
     }
 
     // After hydrate completes (sessions / projects / prefs all loaded

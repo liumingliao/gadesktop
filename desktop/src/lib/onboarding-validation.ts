@@ -5,14 +5,16 @@
  * (#5). Uses Tauri's fs plugin to do real `exists()` checks against
  * the user-picked path and the GA repo's expected layout.
  *
- * Scope is deliberately narrow: filesystem-only checks. No Python
- * subprocess (would require a separate spawn, slow + adds another
- * capability surface). Verifying that `agentmain.py` can actually be
- * imported is left to the first bridge spawn, which surfaces import
- * errors via `error` IPC events.
+ * Filesystem layer + a Python interpreter probe (added 2026-05-15
+ * after the first packaged-build dogfood revealed that the bridge's
+ * Python in prod was the macOS-bundled 3.9.6 with no GA deps). The
+ * probe is what catches the "anthropic missing" failure mode the user
+ * would otherwise hit on first send-message. See lib/python-probe.ts
+ * for the rationale.
  */
 
 import type { PathValidation } from "@/components/screens/onboarding/StepAttach";
+import { probePython, type ProbeResult } from "@/lib/python-probe";
 import type { HealthCheckItem } from "@/types/inspector";
 
 // Trimmed paths only — leading/trailing whitespace from the input is
@@ -57,10 +59,11 @@ export async function validateGAPath(rawPath: string): Promise<PathValidation> {
 }
 
 /**
- * Run the 5-step health check against the chosen path. Each check
- * fires sequentially with a brief delay so the user sees the
- * progression — same visual rhythm as the original mock, just driven
- * by real fs probes.
+ * Run the health check against the chosen path. Each check fires
+ * sequentially with a brief delay so the user sees the progression —
+ * same visual rhythm as the original mock, just driven by real fs
+ * probes. The last row is a Python interpreter probe (see
+ * lib/python-probe.ts) — the only check that exec'es a subprocess.
  *
  * Caller passes:
  *   - `path`: the validated GA path
@@ -68,6 +71,11 @@ export async function validateGAPath(rawPath: string): Promise<PathValidation> {
  *     (running / success / warning state transitions)
  *   - `signal`: AbortSignal so the host can cancel if the user
  *     navigates away from the Health step mid-run
+ *   - `options.onPythonProbed`: callback fired when the Python row
+ *     resolves. Receives the winning alias (a Tauri shell-capability
+ *     `name` like "python-framework-3-14") or null when every
+ *     candidate failed. Onboarding uses this to seed gaConfig.python
+ *     so the subsequent bridge spawn uses the right interpreter.
  *
  * Resolves when the run completes (or aborts). The final `items`
  * snapshot is also passed to onUpdate; callers don't need to track
@@ -77,6 +85,9 @@ export async function runHealthChecks(
   path: string,
   onUpdate: (items: HealthCheckItem[]) => void,
   signal: AbortSignal,
+  options?: {
+    onPythonProbed?: (alias: string | null, result: ProbeResult) => void;
+  },
 ): Promise<HealthCheckItem[]> {
   const resolved = await expandHome(path.trim());
   const probes: HealthProbe[] = [
@@ -113,11 +124,19 @@ export async function runHealthChecks(
     },
   ];
 
-  let items: HealthCheckItem[] = probes.map((p) => ({
-    name: p.name,
-    detail: p.detail,
+  const pythonRow: HealthCheckItem = {
+    name: "Python 解释器",
+    detail: "查找能加载 GA 的 Python",
     state: "pending",
-  }));
+  };
+  let items: HealthCheckItem[] = [
+    ...probes.map<HealthCheckItem>((p) => ({
+      name: p.name,
+      detail: p.detail,
+      state: "pending",
+    })),
+    pythonRow,
+  ];
   onUpdate(items);
 
   for (let i = 0; i < probes.length; i++) {
@@ -151,6 +170,49 @@ export async function runHealthChecks(
     );
     onUpdate(items);
   }
+
+  // Python probe — the only row that actually spawns a subprocess.
+  // Runs after the fs probes so the visual cascade is consistent.
+  if (signal.aborted) return items;
+  const pythonIdx = items.length - 1;
+  items = items.map((c, idx) =>
+    idx === pythonIdx ? { ...c, state: "running" } : c,
+  );
+  onUpdate(items);
+
+  // Pass the GA path to the probe so it validates the actual import
+  // chain (`sys.path.insert(0, gaPath); import agentmain`) rather
+  // than a generic deps check. Catches venv mismatches that a
+  // gaPath-agnostic probe would silently pass.
+  const probeResult = await probePython(resolved, signal);
+  if (signal.aborted) return items;
+
+  if (probeResult.winner) {
+    items = items.map((c, idx) =>
+      idx === pythonIdx
+        ? {
+            ...c,
+            state: "success",
+            detail: `${probeResult.winner!.label} · ${probeResult.winner!.displayPath}`,
+          }
+        : c,
+    );
+    options?.onPythonProbed?.(probeResult.winner.alias, probeResult);
+  } else {
+    items = items.map((c, idx) =>
+      idx === pythonIdx
+        ? {
+            ...c,
+            state: "failed",
+            detail:
+              "在常见路径未找到能加载 GA 的 Python · 请先在 GA 目录把依赖装到一个 .venv 里",
+          }
+        : c,
+    );
+    options?.onPythonProbed?.(null, probeResult);
+  }
+  onUpdate(items);
+
   return items;
 }
 

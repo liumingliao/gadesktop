@@ -74,29 +74,6 @@ export const DEMO_RUNTIME_INFO: RuntimeInfo = {
   gaCommitDate: "2026-05-12T12:59:30+08:00",
   gaBaseline: "cf6551516fcc836f21dcdad592b07c703d09e1d8",
   workbenchVersion: "0.1.0",
-  healthChecks: [
-    { name: "GA path", detail: "~/Documents/GenericAgent", state: "success" },
-    {
-      name: "Python 可用",
-      detail: "Python 3.11.9 (system)",
-      state: "success",
-    },
-    {
-      name: "agentmain.py 可 import",
-      detail: "GA baseline cf65515 · OK",
-      state: "success",
-    },
-    {
-      name: "mykey.py 存在",
-      detail: "5 LLM 配置",
-      state: "success",
-    },
-    {
-      name: "至少一个 LLM 配置可解析",
-      detail: "Claude / OAI / Gemini · parse OK",
-      state: "success",
-    },
-  ],
 };
 
 const NOW_ISO = new Date().toISOString();

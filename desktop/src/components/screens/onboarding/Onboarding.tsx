@@ -24,8 +24,37 @@ export type OnboardingStep = "welcome" | "attach" | "health";
 
 export interface OnboardingProps {
   /** Called when the user completes Step 2 successfully. The host
-   * unmounts the Onboarding screen and renders the main app. */
-  onComplete: (gaPath: string) => void;
+   * unmounts the Onboarding screen and renders the main app.
+   *
+   * `pythonAlias` is the Tauri shell-capability name (e.g.
+   * "python-framework-3-14") for the interpreter the probe found —
+   * what `Command.create()` takes as its first argument. The host
+   * persists it to gaConfig so subsequent bridge spawns use the right
+   * interpreter. Null when probe failed (the Continue button is
+   * disabled in that case, so this is mostly a type-safety hatch). */
+  onComplete: (gaPath: string, pythonAlias: string | null) => void;
+  /**
+   * Flow mode. Default `"fresh"` is the first-launch path: Welcome →
+   * Attach → Health → Main view. `"revisit"` is the Settings → "Re-run
+   * Health Check" path: jumps straight to Health step (uses the
+   * already-saved GA path), relabels Back → "取消" and "进入 Galley"
+   * → "返回 Settings", and requires an `onCancel` callback for the
+   * Back button (since there's no Attach step to step back to).
+   */
+  mode?: "fresh" | "revisit";
+  /**
+   * Required when `mode="revisit"`. Called when the user clicks the
+   * (renamed) Back button to abort without re-saving. The host should
+   * return the user to wherever they were before triggering the
+   * revisit (typically: re-open the Settings dialog).
+   */
+  onCancel?: () => void;
+  /**
+   * Required when `mode="revisit"`. Pre-populates the Health step's
+   * path input with the user's already-saved GA path so the cascade
+   * runs against the right directory without going through Attach.
+   */
+  initialPath?: string;
 }
 
 const STEP_LABELS: { key: OnboardingStep | "done"; label: string }[] = [
@@ -48,9 +77,21 @@ const STEP_LABELS: { key: OnboardingStep | "done"; label: string }[] = [
  * (path existence, agentmain.py import, mykey.py parse, LLM config
  * count) wires up in #10 alongside IPC.
  */
-export function Onboarding({ onComplete }: OnboardingProps) {
-  const [step, setStep] = useState<OnboardingStep>("welcome");
-  const [path, setPath] = useState(EXAMPLE_GA_PATH);
+export function Onboarding({
+  onComplete,
+  mode = "fresh",
+  onCancel,
+  initialPath,
+}: OnboardingProps) {
+  const isRevisit = mode === "revisit";
+  // Revisit jumps straight to Health (Settings already has a saved GA
+  // path; user just wants to re-validate). Welcome/Attach are unreachable
+  // in this mode — the StepProgress dots still render the full chain for
+  // visual continuity, but step state can't backtrack past health.
+  const [step, setStep] = useState<OnboardingStep>(
+    isRevisit ? "health" : "welcome",
+  );
+  const [path, setPath] = useState(initialPath ?? EXAMPLE_GA_PATH);
   const [validation, setValidation] = useState<PathValidation>(null);
   // Active tutorial modal id; null = closed. Set by StepAttach
   // tutorial buttons and StepHealth row-action clicks. Surfaces the
@@ -62,6 +103,11 @@ export function Onboarding({ onComplete }: OnboardingProps) {
   // effect without going Back → Continue. Same dep array; an integer
   // change forces the effect to re-fire and cancels any in-flight run.
   const [healthRunNonce, setHealthRunNonce] = useState(0);
+  // Tauri shell-capability alias for the Python interpreter the probe
+  // chose — survives across re-runs so we don't lose it if the user
+  // clicks 重新检查 after a successful first probe. Persisted into
+  // gaConfig by onComplete.
+  const [probedPython, setProbedPython] = useState<string | null>(null);
 
   // Debounced real path validation via Tauri fs plugin. The
   // setTimeout pacing keeps the UI responsive while the user is still
@@ -118,7 +164,9 @@ export function Onboarding({ onComplete }: OnboardingProps) {
   useEffect(() => {
     if (step !== "health") return;
     const controller = new AbortController();
-    void runHealthChecks(path, setHealthChecks, controller.signal);
+    void runHealthChecks(path, setHealthChecks, controller.signal, {
+      onPythonProbed: (alias) => setProbedPython(alias),
+    });
     return () => controller.abort();
   }, [step, path, healthRunNonce]);
 
@@ -143,6 +191,12 @@ export function Onboarding({ onComplete }: OnboardingProps) {
       ],
       "assets/ 目录可见": [
         { id: "assets-missing", label: "查看教程：重装 GA" },
+      ],
+      "Python 解释器": [
+        {
+          id: "python-missing-anthropic",
+          label: "查看教程：在 GA 目录创建 venv",
+        },
       ],
     }),
     [],
@@ -169,12 +223,23 @@ export function Onboarding({ onComplete }: OnboardingProps) {
   };
 
   const handleFinish = () => {
-    onComplete(path);
+    onComplete(path, probedPython);
   };
 
   return (
-    <div className="flex h-screen min-h-[720px] w-screen min-w-[1120px] flex-col overflow-y-auto bg-app pl-[80px] pr-16 pt-16">
-      <div className="mx-auto flex w-full max-w-[700px] flex-col">
+    // Outer container is a Tauri drag region so the user can move the
+    // window by dragging the empty padding around the content (Onboarding
+    // has no TopBar to drag from). The inner 700px content wrapper opts
+    // back out so text stays selectable and buttons / inputs work
+    // normally — Tauri's drag region inherits down the DOM tree.
+    <div
+      data-tauri-drag-region
+      className="flex h-screen min-h-[720px] w-screen min-w-[1120px] flex-col overflow-y-auto bg-app pl-[80px] pr-16 pt-16"
+    >
+      <div
+        data-tauri-drag-region="false"
+        className="mx-auto flex w-full max-w-[700px] flex-col"
+      >
         <StepProgress step={step} />
 
         <div className="mt-10">
@@ -199,11 +264,13 @@ export function Onboarding({ onComplete }: OnboardingProps) {
           {step === "health" && (
             <StepHealth
               items={healthChecks}
-              onBack={() => setStep("attach")}
+              onBack={isRevisit ? (onCancel ?? handleFinish) : () => setStep("attach")}
               onContinue={handleFinish}
               onRetry={() => setHealthRunNonce((n) => n + 1)}
               onItemAction={handleItemAction}
               itemActions={itemActions}
+              backLabel={isRevisit ? "取消" : "Back"}
+              continueLabel={isRevisit ? "返回 Settings" : "进入 Galley"}
             />
           )}
         </div>
@@ -223,7 +290,8 @@ function isTutorialId(s: string): s is TutorialId {
     s === "wrong-directory" ||
     s === "mykey-setup" ||
     s === "assets-missing" ||
-    s === "memory-info"
+    s === "memory-info" ||
+    s === "python-missing-anthropic"
   );
 }
 
