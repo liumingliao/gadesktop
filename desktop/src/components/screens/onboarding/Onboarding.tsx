@@ -16,6 +16,7 @@ import {
   type Tutorial,
   type TutorialId,
 } from "@/lib/onboarding-tutorials";
+import { EXAMPLE_GA_PATH } from "@/lib/platform";
 import { cn } from "@/lib/utils";
 import type { HealthCheckItem } from "@/types/inspector";
 
@@ -49,7 +50,7 @@ const STEP_LABELS: { key: OnboardingStep | "done"; label: string }[] = [
  */
 export function Onboarding({ onComplete }: OnboardingProps) {
   const [step, setStep] = useState<OnboardingStep>("welcome");
-  const [path, setPath] = useState("~/Documents/GenericAgent");
+  const [path, setPath] = useState(EXAMPLE_GA_PATH);
   const [validation, setValidation] = useState<PathValidation>(null);
   // Active tutorial modal id; null = closed. Set by StepAttach
   // tutorial buttons and StepHealth row-action clicks. Surfaces the

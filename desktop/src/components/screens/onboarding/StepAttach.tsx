@@ -10,8 +10,9 @@ import {
   X,
 } from "@phosphor-icons/react";
 
-import { cn } from "@/lib/utils";
 import type { TutorialId } from "@/lib/onboarding-tutorials";
+import { EXAMPLE_GA_PATH } from "@/lib/platform";
+import { cn } from "@/lib/utils";
 
 export type PathValidation =
   | { kind: "ok"; foundAgentmain: boolean; rawPath: string }
@@ -87,7 +88,7 @@ export function StepAttach({
           type="text"
           value={path}
           onChange={(e) => onPathChange(e.target.value)}
-          placeholder="~/Documents/GenericAgent"
+          placeholder={EXAMPLE_GA_PATH}
           spellCheck={false}
           className="min-w-0 flex-1 rounded-sm border border-line bg-elevated px-3 py-2 font-mono text-[13px] text-ink outline-none transition-colors focus:border-brand focus:ring-[3px] focus:ring-brand/20"
         />

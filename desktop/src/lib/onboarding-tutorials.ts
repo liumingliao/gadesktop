@@ -16,6 +16,8 @@
  * and trust users to scroll.
  */
 
+import { EXAMPLE_GA_PATH } from "@/lib/platform";
+
 export type TutorialId =
   | "download-ga"
   | "wrong-directory"
@@ -49,7 +51,7 @@ export const TUTORIALS: Record<TutorialId, Tutorial> = {
 
 1. 打开 [GA 仓库页面](https://github.com/lsdefine/GenericAgent)
 2. 点绿色 **Code** 按钮 → **Download ZIP**
-3. 解压到你喜欢的位置（例如 \`~/Documents/GenericAgent\`）
+3. 解压到你喜欢的位置（例如 \`${EXAMPLE_GA_PATH}\`）
 
 **方式二：Git Clone**
 
