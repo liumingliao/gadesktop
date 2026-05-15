@@ -9,6 +9,7 @@
  */
 
 import type { ApprovalConfig } from "@/components/screens/settings/Settings";
+import { isWindows } from "@/lib/platform";
 import { type AppError, makeAppError } from "@/types/app-error";
 import type {
   AgentTurn,
@@ -33,7 +34,10 @@ import type { Session } from "@/types/session";
  * install without editing source.
  */
 export const DEMO_GA_CONFIG = {
-  python: "python3",
+  // Windows ships `python.exe` (no version suffix); macOS / Linux
+  // commonly expose `python3` while bare `python` may still point at
+  // a stale Python 2 on older systems. Use the right alias per OS.
+  python: isWindows ? "python" : "python3",
   gaPath: "/Users/inkstone/Documents/GenericAgent",
   bridgeCwd: "/Users/inkstone/Documents/genericagent-webui",
 };

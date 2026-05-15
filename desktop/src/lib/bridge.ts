@@ -1,5 +1,6 @@
 import { Child, Command } from "@tauri-apps/plugin-shell";
 
+import { isWindows } from "@/lib/platform";
 import type { IPCCommand, IPCEvent } from "@/types/ipc";
 
 /**
@@ -20,7 +21,11 @@ import type { IPCCommand, IPCEvent } from "@/types/ipc";
  */
 
 export interface BridgeSpawnArgs {
-  /** Python interpreter path. Defaults to "python3" (must be on PATH). */
+  /**
+   * Python interpreter path. Defaults to "python3" on macOS / Linux
+   * and "python" on Windows (must be on PATH). Override when the user
+   * configured a custom Python in Settings.
+   */
   python?: string;
   /** Path to GA repo (forwarded to bridge as --ga-path). */
   gaPath: string;
@@ -70,7 +75,7 @@ export async function spawnBridge(
   args: BridgeSpawnArgs,
   handlers: BridgeHandlers,
 ): Promise<BridgeClient> {
-  const program = args.python ?? "python3";
+  const program = args.python ?? (isWindows ? "python" : "python3");
   const argv = [
     "-m",
     "bridge.workbench_bridge",
