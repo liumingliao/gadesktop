@@ -30,14 +30,17 @@ docs/refactor/
 ## 当前 cursor
 
 ```
-Phase:    Prototype ✅ → [B1] → B2 → B3 → B4 → v0.5
-                          ↑ 现在在这里
-Status:   Prototype COMPLETE — 17/17 PASS · GO for B1
-Next:     B1 T1.1 — 目录重组 src-tauri→core/, desktop→gui/, bridge→runner/,
-          新建 cli/。见 docs/refactor/B1-rust-core.md
-          BridgeProcess (experiments/bridge-owner/registry.rs) 是 B1
-          runner_manager 模块的 source pattern
-Blocker:  无
+Phase:    Prototype ✅ → B1 ✅ → [B2] → B3 → B4 → v0.5
+                                  ↑ 现在在这里
+Status:   B1 COMPLETE — M1-M7 全部 ship (2026-05-18 单 session)
+          11/12 A acceptance pass + 1 deferred (--pretty → B4)
+          Commits: 4ee23e3 (M1) · ff878b1 (CI hotfix) · d79558a (M2)
+                   · 9f6b369 (M3) · e3f11a1 (M4) · 3e29dbc (M5) · 80feb4c (M6)
+          Devlog: docs/devlog/2026-05-18-b1-rust-core-complete.md
+Next:     B2 T1 (TBD) — runner ownership 迁 Rust
+          Action item before B2 starts: 写 B2 playbook (升格 stub),
+          tag b1-complete, 调和 invariants.md §I4 ↔ playbook T1.15 矛盾 (O8)
+Blocker:  无 (B2 不依赖 v0.2 Windows release，可同步推进)
 ```
 
 **Cursor 更新协议**：每个 sub-task 完成 → 当前 phase playbook 顶部的 cursor 行更新 → 本文件总 cursor 表跟着更新（只 phase 级别）。**不要批量更新**——每 task 一更，防止 session 中断后丢状态。
@@ -47,8 +50,8 @@ Blocker:  无
 | Phase | 状态 | Cursor | 详细 playbook | Last touch |
 |---|---|---|---|---|
 | Prototype: Rust-owned subprocess | ✅ COMPLETE · 17/17 · GO | — | [bridge-owner/README.md](../../core/experiments/bridge-owner/README.md) | 2026-05-18 session 1: all 5 subsections in one sprint |
-| B1: Rust core 骨架 + CLI 只读 | ⏳ 启动中 | (T1.1 目录重组) | [B1-rust-core.md](./B1-rust-core.md) | 2026-05-18 cleared by prototype GO |
-| B2: Bridge ownership 迁 Rust | ⏳ 未启动 | — | [B2-bridge-ownership.md](./B2-bridge-ownership.md) (stub) | 2026-05-15 stub |
+| B1: Rust core 骨架 + CLI 只读 | ✅ COMPLETE · M1-M7 · 11/12 A acceptance | — | [B1-rust-core.md](./B1-rust-core.md) · [devlog](../devlog/2026-05-18-b1-rust-core-complete.md) | 2026-05-18 single session — 21× faster than 3-week estimate |
+| B2: Bridge ownership 迁 Rust | ⏳ 待启动 (升格 stub) | — | [B2-bridge-ownership.md](./B2-bridge-ownership.md) (stub) | 2026-05-15 stub · upgrade to full sub-task list before T1 |
 | B3: useAppStore 拆 slice + 改订阅 | ⏳ 未启动 | — | [B3-store-slice.md](./B3-store-slice.md) (stub) | 2026-05-15 stub |
 | B4: CLI feature-complete + background + artifact | ⏳ 未启动 | — | [B4-cli-bg-artifact.md](./B4-cli-bg-artifact.md) (stub) | 2026-05-15 stub |
 | **v0.5 milestone** | ⏳ | — | — | — |
