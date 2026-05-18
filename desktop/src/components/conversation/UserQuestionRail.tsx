@@ -175,20 +175,27 @@ export function UserQuestionRail({
               aria-label={`跳到第 ${dot.index + 1} 条提问`}
               className="grid size-5 place-items-center focus:outline-none"
             >
+              {/* Active = filled apricot disc; inactive = hollow ring.
+                  Single-axis state (fill vs no-fill) at fixed 8px
+                  size — same visual weight slot for both states, the
+                  ink reading does all the work. */}
               <span
                 className={cn(
-                  "block size-1.5 rounded-full transition-colors",
+                  "block size-2 rounded-full border-[1.5px] transition-colors",
                   dot.index === activeIndex
-                    ? "bg-brand-strong"
-                    : "bg-line-strong group-hover:bg-ink-soft",
+                    ? "border-brand-strong bg-brand-strong"
+                    : "border-line-strong bg-transparent group-hover:border-ink-soft",
                 )}
               />
             </button>
             <span
               role="tooltip"
-              className="pointer-events-none absolute right-full top-1/2 z-10 mr-2 max-w-[320px] -translate-y-1/2 truncate whitespace-nowrap rounded-sm border border-line bg-elevated px-2 py-1 text-[11.5px] text-ink-soft opacity-0 shadow-sm transition-opacity duration-100 group-hover:opacity-100 group-focus-within:opacity-100"
+              className="pointer-events-none absolute right-full top-1/2 z-10 mr-2 flex max-w-[320px] -translate-y-1/2 items-baseline gap-1.5 truncate whitespace-nowrap rounded-sm border border-line bg-elevated px-2 py-1 text-[11.5px] text-ink-soft opacity-0 shadow-sm transition-opacity duration-100 group-hover:opacity-100 group-focus-within:opacity-100"
             >
-              第 {dot.index + 1} 条 · {dot.preview}
+              <span className="font-mono text-[10.5px] text-ink-muted">
+                {dot.index + 1}
+              </span>
+              <span className="truncate">{dot.preview}</span>
             </span>
           </div>
         ))}
