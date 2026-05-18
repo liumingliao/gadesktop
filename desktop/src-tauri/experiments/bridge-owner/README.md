@@ -92,7 +92,7 @@ Compare with the current TypeScript path. Run on the same machine, same GA, same
   - Rust ownership: must not be **>50ms slower** than baseline.
 - [x] **P2**: Streaming throughput. Long response (100+ tokens). Time from first to last token. Compare event delivery rate. _(2026-05-18 session 1 — Approach B: Rust-side ~4684 events/sec sustained; strict comparison deferred; results.md)_
   - Must not be **>10% slower** than baseline.
-- [x] **P3**: Memory. Run 3 bridges for 5 minutes. Galley process memory growth must be **<50 MB** beyond baseline (no leak per event broadcast). _(2026-05-18 session 1 — 30s run: Δ +0.2 MB, far under 50 MB threshold; spec-compliant 300s run pending in background; results.md)_
+- [x] **P3**: Memory. Run 3 bridges for 5 minutes. Galley process memory growth must be **<50 MB** beyond baseline (no leak per event broadcast). _(2026-05-18 session 1 — **300s spec-compliant: +0.4 MB; RSS plateaus at ~3150 KB from t+111s for 3+ minutes despite 9003 events** = steady-state, no per-event leak; results.md)_
 
 ### Stress
 

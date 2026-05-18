@@ -207,7 +207,14 @@ reasoning.
 | P1 set_llm RTT (100 samples) | min 224µs · mean 303µs · p50 300µs · p95 405µs · **p99 614µs** · max 614µs |
 | P2 sustained throughput (200 events) | **~4684 events/sec** (42.7ms for 200, send phase 611µs) |
 | P3 RSS growth (30s, 3 bridges, 903 events) | +0.2 MB (2724 → 2940 KB) |
-| P3 spec-compliant 300s run | (filled in after the 5-min background run completes) |
+| P3 spec-compliant 300s run (3 bridges, 9003 events) | **+0.4 MB total** (2732 → 3156 KB); RSS plateaus at ~3150 KB from t+111s onward |
+
+P3 300s plateau is the strongest signal in the whole prototype: after
+the first 2 minutes of warm-up growth (caches, thread pools, broadcast
+buffer expansion settling), RSS sits flat at 3144–3156 KB for the
+remaining 3+ minutes despite ~6000 events flowing through. This is
+**steady-state, no per-event leak**. The "memory growth must be <50 MB
+beyond baseline" spec threshold is 125× looser than what we observe.
 
 ### P1-P3 strategy: Approach B
 
