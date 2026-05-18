@@ -81,6 +81,120 @@ Scaffold + L1.
 - `ps -p` cross-check passed: all 3 alive at the same wall-clock moment.
 - Filtered pgrep after shutdown: zero `exp_*` orphans.
 
+### L3 status: PASS
+
+External `kill -9 <pid>` (via subprocess, **not** `Child::kill()`) detected by
+`tokio::process::Child::wait()` in **3.48 ms** — three orders of magnitude
+under the 1-second budget.
+
+- Exit status: `ExitStatus(unix_wait_status(9))` confirms SIGKILL was the
+  cause of death (signal 9). tokio surfaces the signal via `ExitStatusExt`.
+- tokio reacts to SIGCHLD essentially immediately — no need for our own
+  signal handler. This is the *load-bearing* assumption for B path's
+  "bridge died unexpectedly" event emission.
+- Pattern for production: a `tokio::spawn` task per bridge holding the
+  `Child` and awaiting `wait_exit()`. When it resolves, emit a
+  `bridge:exited` event to subscribers + clean up registry entry.
+  Compiles down to just a select loop + SIGCHLD wakeup — cheap.
+
+### L5 status: PASS
+
+Outer process spawns inner (same binary, env `EXPERIMENT_PANIC=1`). Inner
+spawns a bridge, waits for ready, prints pid, then `panic!()`. Outer reads
+pid, waits for inner to exit, then `ps -p` confirms bridge child is gone.
+
+- Inner exit status: `ExitStatus(unix_wait_status(25856))`. `25856 >> 8 ==
+  101` — Rust's default panic exit code. This *confirms unwind happened*
+  (not abort) — if panic strategy were `abort`, Drop wouldn't have run and
+  the bridge child would've survived.
+- During unwind: `bridge: BridgeProcess` was still in scope → its `Child`
+  dropped → `kill_on_drop` syscall fired SIGKILL → bridge died near-
+  simultaneously with inner.
+- The pattern depends on `[profile.dev] panic = "unwind"` (Cargo default).
+  **B path Tauri prod build must preserve unwind** — otherwise a real
+  panic in main thread orphans every alive bridge. Worth recording as an
+  invariant when we get to B1. Verified: our Cargo.toml has no `panic =
+  "abort"` override, so this is currently safe; the future risk is someone
+  adding it as a binary-size optimization without realizing the cost.
+
+### Lifecycle subsection: COMPLETE (L1-L5 all pass)
+
+5/17 of overall checklist (the real count is 17 = 5+3+4+3+2, not 13 as I
+miscounted in the first few session messages). Conclusion for lifecycle:
+**Rust-owned subprocess ownership is at least as good as TS-owned for
+every clean-shutdown path we care about** — graceful shutdown (L1
++ caller-side `shutdown()`), `kill -9` external (L3, 3ms detection),
+parent quit / drop (L4), parent panic with unwind (L5). All within
+budget.
+
+### C1-C3 status: PASS (stdin → bridge command path)
+
+8/17 of overall checklist. Subsection complete.
+
+| Check | Time | Notes |
+|---|---|---|
+| C1 single round-trip | **1.7 ms** | set_llm → llm_changed with matching index |
+| C2 3-in-order round-trip | **1.1 ms** | sent in 20µs, drained in ~1ms |
+| C3 5-fire-then-drain | **1.76 ms** | sent in 28µs, drained in 1.73ms — no deadlock |
+
+Insight: Rust→Python→Rust round-trip for a trivial command is ~340µs per
+command. That's ~2900 commands/sec throughput, three orders of magnitude
+beyond what any human-driven or agent-driven workload needs. Pipe write
++ Python event-loop tick + pipe read is well-optimized in tokio + Python.
+
+**Caveat on C3**: the spec says "while bridge is mid-stream of output".
+Our cheap test (no LLM call) doesn't produce a long stream — bridge
+emits 1 event per command and waits idle. The deadlock vector this
+*actually* probes is "stdin write while stdout has unread broadcast
+buffer", which we cover. A real "mid-stream" with 50+ tokens/sec
+streaming output is exercised in S3 later, which is the place to put
+deeper deadlock pressure.
+
+### S1-S4 status: PASS (stdout → subscriber path)
+
+12/17 of overall checklist. Subsection complete.
+
+| Check | Result |
+|---|---|
+| S1 line-by-line JSON parse | first stdout line parsed via serde_json, `kind=ready` confirmed |
+| S2 dual subscriber (direct + unix socket) | 3 events content-identical on both |
+| S3 100-event burst | **~4548 events/sec** — 90× the 50/sec spec floor — no drops on either subscriber |
+| S4 subscriber disconnect | A unaffected after B drops (batch1 both 2/2, batch2 A 3/3 with B gone) |
+
+S3 is the most informative: 100 events go through the full chain (Python
+emit → bridge stdout pipe → Rust BufReader::lines → broadcast::Sender →
+two receivers concurrently → one of them forwards over `tokio::net::
+UnixStream` → client reads). End-to-end is ~220µs per event. For the
+B path, this means even a chatty agent (10s of events/sec) leaves vast
+headroom; the broadcast model isn't a bottleneck.
+
+**Validation of the broadcast pattern**: S4 explicitly proves what we
+need for production — *one slow / dead subscriber doesn't kill the
+others*. The CLI socket disconnecting must NOT affect GUI's event flow,
+and vice versa. Confirmed: when the unix socket subscriber drops, the
+direct (broadcast::Receiver) subscriber continues unaffected.
+
+### X1-X2 status: PASS (stress)
+
+14/17 of overall checklist.
+
+| Check | Result |
+|---|---|
+| X1 100 commands tight loop | All 100 responses received, total 24.72ms (~4046/sec) |
+| X2 10,000 events | Total 2.22s, **~4498 events/sec sustained**, no OOM, no drops |
+
+X2 is the load-bearing stress result. 10k events through the full chain
+(Python emit → bridge stdout → Rust BufReader → broadcast::send →
+receiver consumes) sustained at ~4500/sec — *identical throughput to
+S3's 100-event burst* (which hit 4548/sec). That's linear scaling with
+no degradation, no leak, no buffer overflow. Broadcast channel cap
+1024 doesn't matter at this rate because the receiver keeps pace; the
+channel never actually buffers more than a handful at a time.
+
+For B path sanity: this rate is ~100× anything human-driven, and ~10×
+anything an LLM streams. The bridge / broadcast layer is *never* the
+bottleneck.
+
 ### Session 1 surprises
 
 - **`pgrep -f workbench_bridge` is too coarse** during dogfood. JC's running

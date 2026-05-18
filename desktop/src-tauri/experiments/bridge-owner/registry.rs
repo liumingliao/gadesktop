@@ -121,6 +121,12 @@ impl BridgeProcess {
         Ok(())
     }
 
+    /// Await child exit and return its `ExitStatus`. Idempotent — tokio's
+    /// `Child::wait()` caches the result so this can be called repeatedly.
+    pub async fn wait_exit(&mut self) -> std::io::Result<std::process::ExitStatus> {
+        self.child.wait().await
+    }
+
     /// Send `{kind:"shutdown"}` and wait up to 3s for graceful exit.
     /// Drop falls back to kill_on_drop if this returns first.
     pub async fn shutdown(mut self) -> anyhow::Result<()> {

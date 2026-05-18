@@ -30,7 +30,7 @@ serde_json = "1"
 # Experiment-only deps: throwaway bridge-owner prototype (Prototype phase of
 # Galley Core refactor). Gated behind `experiments` feature so production
 # build never pulls these. See experiments/bridge-owner/README.md.
-tokio = { version = "1", features = ["macros", "rt-multi-thread", "io-util", "process", "sync", "time"], optional = true }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "io-util", "process", "sync", "time", "net", "fs"], optional = true }
 anyhow = { version = "1", optional = true }
 
 [features]
