@@ -1,11 +1,11 @@
 # B1 · Rust core 骨架 + CLI 只读
 
 ```
-Cursor:   T4.1  (M4 启动 — cli/ crate deps + clap subcommand 骨架)
-Status:   🚧 启动中 (M3 done · 12/12 tests · Tauri command `list_sessions` registered)
+Cursor:   T5.1  (M5 启动 — docs/agent-api.md 初稿)
+Status:   🚧 启动中 (M4 done · galley CLI binary works · 12 core + 6 cli tests pass · ESCAPE fix on M3)
 Started:  2026-05-18
-Last touch: 2026-05-18 M3 done — sqlx reads, 6 trait methods implemented
-Predecessor: M2 commit d79558a (trait + types)
+Last touch: 2026-05-18 M4 done — clap subcommands, 6 reads, GALLEY_DB_PATH override
+Predecessor: M3 commit 9f6b369 (sqlx reads)
 Successor:   B2 (bridge ownership 迁 Rust)
 Duration:    3 周 (D1-D15)
 ```
@@ -201,8 +201,8 @@ Duration:    3 周 (D1-D15)
 
 ### Sub-tasks
 
-- [ ] **T4.1** `cli/Cargo.toml`：依赖 `galley-core` (path = "../core")、`clap` (with `derive` feature)、`tokio` (with `rt-multi-thread`、`macros`)、`serde_json`
-- [ ] **T4.2** `cli/src/main.rs`：clap subcommand 结构骨架：
+- [x] **T4.1** `cli/Cargo.toml`：依赖 `galley-core` (path = "../core")、`clap` (with `derive` feature)、`tokio` (with `rt-multi-thread`、`macros`)、`serde_json`
+- [x] **T4.2** `cli/src/main.rs`：clap subcommand 结构骨架：
   ```rust
   #[derive(Parser)]
   struct Cli {
@@ -219,15 +219,15 @@ Duration:    3 周 (D1-D15)
       Version,
   }
   ```
-- [ ] **T4.3** 共享的 output formatter：JSON 默认、`--pretty` 切 table（用 `comfy_table` 或类似 crate）
-- [ ] **T4.4** 实现 `galley sessions list [--project=X] [--status=...] [--json|--pretty]`
-- [ ] **T4.5** 实现 `galley sessions search <kw> [--scope=all|active]`
-- [ ] **T4.6** 实现 `galley session brief <id>`
-- [ ] **T4.7** 实现 `galley session show <id> [--tail=N]`
-- [ ] **T4.8** 实现 `galley status`
-- [ ] **T4.9** 实现 `galley health`
-- [ ] **T4.10** 实现 `galley version`：输出 `{"galley_version": "0.x.y", "schema_version": 1}`
-- [ ] **T4.11** Exit code 分类：在 `main()` 末尾捕获 `Result<()>` 转 exit code：
+- [~] **T4.3** 共享的 output formatter：JSON 默认 ✅；`--pretty` table 切换**未实现** — 推到 M4 polish 或 B4（agent-first MVP 优先 NDJSON；人类 readable view 不阻塞 SOP / CLI 接入）
+- [x] **T4.4** 实现 `galley sessions list [--project=X] [--status=...] [--json|--pretty]`
+- [x] **T4.5** 实现 `galley sessions search <kw> [--scope=all|active]`
+- [x] **T4.6** 实现 `galley session brief <id>`
+- [x] **T4.7** 实现 `galley session show <id> [--tail=N]`
+- [x] **T4.8** 实现 `galley status`
+- [x] **T4.9** 实现 `galley health`
+- [x] **T4.10** 实现 `galley version`：输出 `{"galley_version": "0.x.y", "schema_version": 1}`
+- [x] **T4.11** Exit code 分类：在 `main()` 末尾捕获 `Result<()>` 转 exit code：
   ```rust
   match run().await {
       Ok(()) => 0,
@@ -237,11 +237,11 @@ Duration:    3 周 (D1-D15)
       Err(_) => 1,
   }
   ```
-- [ ] **T4.12** Error output 也是 JSON：`{"error": "session_not_found", "session_id": 999, "message": "..."}` 走 stdout（**注意**：错误输出走 stdout 不是 stderr，agent-first 设计——agent 读统一一处。stderr 留给 Rust panic / 真正 fatal）。**这一条要 push back 给 JC 确认**（写 running notes）
-- [ ] **T4.13** 用 `clap` 的 `--help` 自动生成 help text。**额外**：实现 `galley help --as-agent` 输出 agent-friendly cheatsheet（每个命令一行 + JSON request/response 概要）
-- [ ] **T4.14** NDJSON 输出验证：`galley sessions list | jq -c` 应该一行一对象解析成功
-- [ ] **T4.15** Integration tests：`cli/tests/cli_test.rs` 起 binary（`std::process::Command`），捕获 stdout/exit，对比 expected
-- [ ] **T4.16** `cd cli && cargo build --release`，binary 输出到 `cli/target/release/galley`
+- [x] **T4.12** Error output 也是 JSON：`{"error": "session_not_found", "session_id": 999, "message": "..."}` 走 stdout（**注意**：错误输出走 stdout 不是 stderr，agent-first 设计——agent 读统一一处。stderr 留给 Rust panic / 真正 fatal）。**这一条要 push back 给 JC 确认**（写 running notes）
+- [~] **T4.13** clap `--help` 自动生成 help text ✅；`galley help --as-agent` agent-cheatsheet **未实现** — M5 写 agent-api.md 时一并出，比单独写一个 cheatsheet 信息密度更高
+- [x] **T4.14** NDJSON 输出验证：`galley sessions list | jq -c` 应该一行一对象解析成功
+- [x] **T4.15** Integration tests：`cli/tests/cli_test.rs` 起 binary（`std::process::Command`），捕获 stdout/exit，对比 expected
+- [x] **T4.16** `cd cli && cargo build --release`，binary 输出到 `cli/target/release/galley`
 
 ### M4 完成标志
 
@@ -372,13 +372,24 @@ B1 全部 acceptance 跑过，devlog ship，B2 playbook 写好可以启动。
 - **N20 (T3.13 Tauri wrapper · migration template)**: Only `list_sessions` exposed via `#[tauri::command]` for M3. Pattern: `async fn list_sessions(filter: SessionFilter) -> std::result::Result<Vec<SessionBrief>, String>` — error is JSON-stringified `GalleyError` so the GUI side can `JSON.parse()` and pattern-match on `error` discriminant. Each Tauri command currently opens its own `SqliteGalley::open()` — wasteful but simple. **M6** will introduce app-state-managed shared pool to remove per-call open overhead (and serves as the B2/B3 template). Wrote no `loadSessionsViaCore()` TS helper yet — playbook M6 covers that. M3 stops at the Rust + Tauri-handler-registration layer; GUI consumption is M6.
 - **N21 (status() truthfulness)**: `status()` impl noted in doc-comment that B1's persistence-truth view (only durable statuses are stored — `archived` / `completed` / `cancelled`) means `running` / `waiting_input` / `errored` counts will usually be 0 unless caught mid-write. Real runtime counts require runner-state introspection (B2+). This is fine: the agent-facing API surfaces persistent truth in B1, runtime truth in B2+ — both honest, just different snapshots.
 
+#### 2026-05-18 · M4 CLI binary + 6 commands + 6 integration tests + ESCAPE fix
+
+- **N22 (T4.1 deps minimal)**: `clap 4 (derive)`, `tokio 1 (macros + rt — single-thread runtime since CLI is read-only)`, `serde + serde_json`, `galley-core { path = "../core" }`. No `comfy_table` etc. — JSON-only output for B1. CLI binary `target/debug/galley` builds in ~5s incrementally on top of the core build.
+- **N23 (T4.12 · O3 resolved)**: **Errors emit JSON on stdout**, not stderr. Per playbook G9 "倾向 stdout 让 agent 一处读" — pushed back to JC via context; JC said "按你建议的执行" so going with stdout-only. Exit code carries the category signal for SOPs that don't want to parse JSON: `0` success / `1` internal / `2` invalid_args / `3` not_found / `4` db_unavailable. Stderr is reserved for `panic!` and Rust runtime backtraces — agents can pipe `2>/dev/null` confidently. Matches the playbook T4.11 exit-code table and `GalleyError` variant order.
+- **N24 (T3.x hotfix · ESCAPE single-char)**: `search_messages` LIKE fallback shipped in M3 with `ESCAPE '\\\\'` (Rust source) → `ESCAPE '\\'` (SQL) → SQLite saw a two-char escape sequence and rejected with `(code: 1) ESCAPE expression must be a single character`. Caught during M4 dogfood (`galley sessions search "你好"` failed because 你好 is 2 chars → goes through LIKE path). Fix is one char: `ESCAPE '\\'` in Rust source = `ESCAPE '\'` in SQL = single-backslash escape, matching what `escape_like()` produces. Bundling into the M4 commit since M3 is already pushed and the fix is one line.
+- **N25 (T3.x hotfix · GALLEY_DB_PATH override)**: Added `GALLEY_DB_PATH` env var override at the top of `db_path()`. Without it the CLI integration tests would have to compete with the user's real DB at the system app-data path (terrifying). With it: tests spin up a fresh sqlite file in a tempdir + point CLI at it. Also useful for advanced SOPs that want to read a snapshot. Documented in the doc-comment.
+- **N26 (T4.15 cli/tests/cli_test.rs)**: 6 integration tests spawning `target/debug/galley` via `std::process::Command`, capturing stdout + exit. Covers happy paths (version, list, status) + each error class (not_found exit 3, invalid_args exit 2, db_unavailable exit 4). Uses `CARGO_BIN_EXE_galley` to resolve the binary path — Cargo injects this for test-runner crates so the path stays correct across debug/release/cargo-target overrides.
+- **N27 (T4.15 · tempfile dev-dep)**: First try used `temp_dir() + nanos + pid` for unique tempdirs; one of 6 tests failed on parallel run with `table projects already exists` (timing race or stale tempdir). Switched to `tempfile = "3"` (RAII auto-cleanup, guaranteed-unique names). 6/6 stable on retry. Worth the tiny extra dep.
+- **N28 (T4.3 / T4.13 partial)**: `--pretty` table output + `galley help --as-agent` cheatsheet **NOT shipped in M4**. Reasoning: B1's agent-first contract is "JSON on stdout" — that's the load-bearing piece, ship it minimal and clean. `--pretty` is a human-readability convenience that can be added in M4 polish, B4, or never (agents pipe through `jq` already). `help --as-agent` is genuinely useful but would duplicate work with M5's agent-api.md — better to write the doc once + reference from `--help` than to maintain a separate cheatsheet that drifts. Marked T4.3 / T4.13 with `[~]` (partial) instead of `[x]`.
+- **N29 (T4 binary build time)**: Cold workspace build with sqlx + clap pulls ~430 packages. ~1min on Apple Silicon with warm crates.io cache. Incremental rebuild after a `db.rs` edit: ~5s. CLI-only rebuild (`cargo build -p galley-cli` after touching only main.rs): ~2s. Acceptable.
+
 ---
 
 ## Open decisions
 
 - [O1] ~~Cargo workspace vs 独立 crate (T2.1)：倾向 workspace，但要验证 Tauri build 兼容~~ **RESOLVED 2026-05-18 → workspace root at `core/`, members include self + `../cli`** (see running note N6)
 - [O2] ~~Rust SQLite 驱动：`rusqlite` 推荐，但要确认 libsqlite3-sys 版本跟 tauri-plugin-sql 不冲突 (T3.1)~~ **RESOLVED 2026-05-18 → `sqlx 0.8.6` + `sqlite` feature** (matches the version already pulled in transitively by `tauri-plugin-sql 2.4.0`; sharing `libsqlite3-sys 0.30.1` rules out the linking-conflict hazard the gotcha worried about). Playbook G6 claimed tauri-plugin-sql uses rusqlite internally — that's wrong, Cargo.lock confirms sqlx. Async-native sqlx also pairs naturally with the `async_trait`-defined `GalleyApi`; rusqlite would have needed `tokio::task::spawn_blocking` wrappers in every method.
-- [O3] Error output 走 stdout 还是 stderr (T4.12)：影响 agent SOP 读法
+- [O3] ~~Error output 走 stdout 还是 stderr (T4.12)~~ **RESOLVED 2026-05-18 → stdout** (errors emit JSON on stdout matching `GalleyError` shape; exit code carries category for SOPs that don't want to parse). Stderr reserved for panic / rustc backtrace only. See running note N23.
 - [O4] B1 阶段 `health` 命令复杂度边界 (T3.9 / G8)：是否包 Python dry-run
 - [O5] GUI 迁移模板选哪个函数 (T6.1)：loadProjects vs loadSessions vs getPref
 - [O6] cli/ 是否需要 platform-specific build (Windows .exe icon resource embedding 等)：B1 暂不做，B4 polish

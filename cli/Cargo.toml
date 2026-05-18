@@ -2,7 +2,7 @@
 name = "galley-cli"
 version = "0.1.0-dev"
 edition = "2021"
-description = "Galley CLI — agent-first interface to Galley Core (placeholder; impl lands in B1 M4)"
+description = "Galley CLI — agent-first interface to Galley Core (B1 M4+: 6 read commands)"
 # Workspace root lives at ../core (not in an ancestor of this crate),
 # so cargo needs an explicit hint to find it. Without this, invoking
 # `cargo build` from cli/ would treat the crate as standalone and use a
@@ -14,3 +14,37 @@ name = "galley"
 path = "src/main.rs"
 
 [dependencies]
+# Reuse the GalleyApi trait + SqliteGalley impl from the Rust core
+# crate. CLI is an in-process consumer in B1 (no socket / daemon —
+# B1-I5); B4 will introduce the daemon transport and a thin client
+# proxy here.
+galley-core = { path = "../core" }
+
+# Argument parser. `derive` feature lets us declare subcommands as
+# enums with helpful auto-derived help strings.
+clap = { version = "4", features = ["derive"] }
+
+# Async runtime. Galley Core's reads are all `async`, and clap's main
+# entrypoint is sync — `#[tokio::main]` bridges. multi-thread isn't
+# needed for the CLI's read path; single-thread keeps the binary
+# smaller.
+tokio = { version = "1", features = ["macros", "rt"] }
+
+# Output serialization. JSON is the default (one object per line for
+# list-returning commands → NDJSON). `--pretty` will eventually
+# switch to a table formatter; B1 ships JSON-only and adds the
+# pretty path in M4 polish if time permits.
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[dev-dependencies]
+# Same sqlx version as galley-core so the integration tests can
+# seed the temp DB with the production migration SQL.
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "sqlite"] }
+# `#[tokio::test]` macro for async setup helpers; the CLI itself is
+# spawned via std::process::Command so the test runtime only drives
+# the seed phase.
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+# RAII temp directories — each test gets a guaranteed-unique dir
+# regardless of timing collisions across parallel test runners.
+tempfile = "3"

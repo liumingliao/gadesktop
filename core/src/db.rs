@@ -43,7 +43,18 @@ const DB_FILENAME: &str = "workbench.db";
 /// CLI binary. Returns `None` if the platform's app-data directory
 /// can't be determined (very rare — would mean `$HOME` / `%APPDATA%`
 /// are both unset).
+///
+/// **Override.** `GALLEY_DB_PATH` env var, when set, takes precedence
+/// — Galley uses that exact file path. Intended for CLI integration
+/// tests (point at a fixture) and advanced agent SOPs that want to
+/// read from a snapshot. The Tauri GUI process inherits the user's
+/// env so setting it for an interactive session works too.
 pub fn db_path() -> Option<PathBuf> {
+    if let Ok(override_path) = std::env::var("GALLEY_DB_PATH") {
+        if !override_path.is_empty() {
+            return Some(PathBuf::from(override_path));
+        }
+    }
     // `directories` parses the identifier as `qualifier.organization.application`
     // but Tauri stores under the full identifier as a single segment. We pass
     // ("", "", "app.galley") so it produces `<base>/app.galley/` rather than
@@ -383,7 +394,7 @@ impl GalleyApi for SqliteGalley {
              FROM messages m \
              JOIN sessions s ON s.id = m.session_id \
              WHERE m.role IN ('user','assistant') \
-               AND m.content LIKE ? ESCAPE '\\\\'{scope_clause} \
+               AND m.content LIKE ? ESCAPE '\\'{scope_clause} \
              ORDER BY s.last_activity_at DESC \
              LIMIT ?"
         );
@@ -448,10 +459,12 @@ impl GalleyApi for SqliteGalley {
             detail: db_path().map(|p| p.display().to_string()),
         });
 
-        // 2. GA path (from prefs.ga_path JSON). Reads as a string value;
-        // checks file existence.
+        // 2. GA path (from prefs.ga_config JSON, field `gaPath`).
+        // The pref key is snake_case (`ga_config`) but the inner JSON
+        // uses camelCase to match the TS gaConfig shape — see
+        // gui/src/stores/useAppStore.ts setPref("ga_config", ...).
         let ga_path: Option<String> = sqlx::query_scalar::<_, Option<String>>(
-            "SELECT json_extract(value, '$.gaPath') FROM prefs WHERE key = 'gaConfig' LIMIT 1",
+            "SELECT json_extract(value, '$.gaPath') FROM prefs WHERE key = 'ga_config' LIMIT 1",
         )
         .fetch_optional(&self.pool)
         .await
