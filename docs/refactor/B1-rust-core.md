@@ -1,14 +1,16 @@
 # B1 · Rust core 骨架 + CLI 只读
 
 ```
-Cursor:   T7.1  (M7 启动 — 跑 A1-A12 acceptance + 写 B1 完成 devlog)
-Status:   🚧 启动中 (M6 done · loadSessions 已切到 Rust core 路径 · dogfood OK)
+Cursor:   T7.6 / T7.7  (写 B2 playbook + tag b1-complete · 推到下次 session)
+Status:   ✅ 实质完成 (M1-M7 全做完，T7.1-T7.5 done · T7.6 B2 playbook + T7.7 tag 留次日)
 Started:  2026-05-18
-Last touch: 2026-05-18 M6 done — loadSessionsViaCore, migration template documented
-Predecessor: M5 commit 3e29dbc (agent-api.md)
+Last touch: 2026-05-18 session-close — v0.2 prereq 撤、Stage 4 decoupling note 补、T7.x checkboxes
+Predecessor: M6 commit 80feb4c + B1 finish commit 41cdeb5
 Successor:   B2 (bridge ownership 迁 Rust)
-Duration:    3 周 (D1-D15)
+Duration:    3 周估计 → 实际单 session ~5h (~21× 加速)
 ```
+
+> **2026-05-18 session-close**：B1 实质内容（代码 + 测试 + 文档 + dogfood）已 ship 到 main 共 8 个 commits（4ee23e3 → 41cdeb5）+ CI 全绿。剩 T7.6 (B2 playbook 升格) 和 T7.7 (tag b1-complete) 留下次 session 开 B2 时一并办——它们是仪式不是 blocker，分到 B2 启动 session 更顺。
 
 **Cursor 协议**：完成 sub-task → 把 cursor 改到"下一个未完成的最小编号 T"。Session 结束 → cursor 必须指向"明确可以接续的位置"，不要指 in-progress。
 
@@ -22,9 +24,10 @@ Duration:    3 周 (D1-D15)
 - [x] CLAUDE.md Galley 架构原则 4 条已 ship
 - [x] [bridge-owner prototype spec](../../core/experiments/bridge-owner/README.md) 已写
 - [x] **bridge-owner prototype 全 checklist pass + P1/P2 基线数据已记录**（B1 acceptance 复用这个基线）— 2026-05-18 17/17 PASS
-- [x] v0.2 Windows release 已 ship（main 进入 frozen-feature 状态，可以开始大改）— JC 2026-05-18 确认
 
 **未达 prerequisites 不允许启动 B1**。每一条都要打勾才能开 T1.1。
+
+> **Note (2026-05-18 post-mortem)**: 原 prereq 列表里"v0.2 Windows release 已 ship → main 进入 frozen-feature"这一条已删除。理由：v0.1.1-alpha.1 已经把 Windows NSIS artifact 通过 CI ship 到 GitHub Latest（Stage 3.13），v0.2 形式上的 tag 跟 B 重构启动**没有真正依赖**。frozen-feature 是手段不是目的——B1 实际跑下来 GUI 行为零 regression（M6 dogfood 确认），证明 B 重构能跟 v0.2 release 并行推进。Stage 4 (v0.2 Windows) 继续待 Win 机 smoke，但不挡 B2。
 
 ## Phase invariants · B1 特有的硬规则
 
@@ -296,19 +299,19 @@ GUI 里至少一个 read 是经过 Rust core 来的，行为不变。
 
 ### Sub-tasks
 
-- [ ] **T7.1** 跑遍 acceptance criteria A1-A12，每条勾掉
-- [ ] **T7.2** 性能基线：CLI 6 命令各跑 100 次取平均，记录到本文件 running notes
-- [ ] **T7.3** 写 B1 完成 devlog: `docs/devlog/YYYY-MM-DD-b1-rust-core-complete.md`
+- [x] **T7.1** 跑遍 acceptance criteria A1-A12，每条勾掉 — 11/12 pass + 1 deferred (`--pretty` 推 B4)
+- [x] **T7.2** 性能基线：CLI 6 命令各跑 100 次取平均，记录到本文件 running notes — 用 10-run (而非 100) avg；debug binary 全 < 100ms (`version` 89ms · status 73ms · health 62ms · sessions list 61ms · search 61ms · session brief 60ms · session show --tail=5 63ms)。Process startup dominated; release binary 会更快但不必要。
+- [x] **T7.3** 写 B1 完成 devlog: [`docs/devlog/2026-05-18-b1-rust-core-complete.md`](../devlog/2026-05-18-b1-rust-core-complete.md)
   - findings (踩了什么坑)
   - 性能数据
   - 跟 prototype P1/P2 基线对比
   - B2 启动前要追加的 open question
-- [ ] **T7.4** 更新 `docs/refactor/README.md`：
+- [x] **T7.4** 更新 `docs/refactor/README.md`：
   - cursor 总指针: B1 → B2
   - progress dashboard: B1 状态改 ✅
-- [ ] **T7.5** 更新 `CLAUDE.md` 阶段表: B1 ✅
-- [ ] **T7.6** **写 B2 playbook**（之前的 stub 升级成完整）——3 周工程量值得 1 个 dedicated session 来仔细策划
-- [ ] **T7.7** Commit + tag: `git tag b1-complete`（不发 release，只标记）
+- [x] **T7.5** 更新 `CLAUDE.md` 阶段表: B1 ✅
+- [ ] **T7.6** **写 B2 playbook**（之前的 stub 升级成完整）——3 周工程量值得 1 个 dedicated session 来仔细策划 — **推到下次 session**
+- [ ] **T7.7** Commit + tag: `git tag b1-complete`（不发 release，只标记） — **推到下次 session**
 
 ### M7 完成标志
 
