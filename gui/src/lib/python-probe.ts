@@ -34,7 +34,7 @@
  * Constraints:
  *   - Tauri's `shell:allow-spawn` doesn't support regex validators on
  *     the `cmd` field, so every candidate must be pre-registered in
- *     `src-tauri/capabilities/default.json`. The CANDIDATES list below
+ *     `core/capabilities/default.json`. The CANDIDATES list below
  *     mirrors that allowlist verbatim — keep them in sync.
  *
  * V0.2 will move bridge spawn to a Rust-side `tauri::command` and
@@ -70,7 +70,7 @@ export interface PythonCandidate {
  *
  * IMPORTANT: every alias here must have matching entries in
  * `shell:allow-spawn` / `shell:allow-stdin-write` / `shell:allow-kill`
- * in `src-tauri/capabilities/default.json`. The capability uses `$HOME`
+ * in `core/capabilities/default.json`. The capability uses `$HOME`
  * so we keep the same prefix in `displayPath`; the probe expands it
  * before passing to spawn args (`$HOME` substitution is the shell
  * plugin's job, but we want a real path for diagnostics).

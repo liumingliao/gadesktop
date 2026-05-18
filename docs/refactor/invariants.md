@@ -155,7 +155,7 @@ v0.1 / v0.2 用户的 SQLite schema、prefs 格式、文件位置 ship 之后是
 
 ## I11. Cargo `panic = "unwind"` 必须保留
 
-**`desktop/src-tauri/Cargo.toml` 的 dev + release profile 不允许设 `panic = "abort"`**。Cargo 默认是 `panic = "unwind"`——保持默认即可，但任何 PR 显式加 `[profile.*] panic = "abort"` 拒绝。
+**`core/Cargo.toml` 的 dev + release profile 不允许设 `panic = "abort"`**。Cargo 默认是 `panic = "unwind"`——保持默认即可，但任何 PR 显式加 `[profile.*] panic = "abort"` 拒绝。
 
 **为什么**：
 

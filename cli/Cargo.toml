@@ -1,0 +1,11 @@
+[package]
+name = "galley-cli"
+version = "0.1.0-dev"
+edition = "2021"
+description = "Galley CLI — agent-first interface to Galley Core (placeholder; impl lands in B1 M4)"
+
+[[bin]]
+name = "galley"
+path = "src/main.rs"
+
+[dependencies]

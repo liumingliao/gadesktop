@@ -4,6 +4,12 @@ version = "0.1.1-alpha.1"
 description = "A Tauri App"
 authors = ["you"]
 edition = "2021"
+# Two `[[bin]]` exist (`desktop` + `bridge-owner-experiment`). The second is
+# gated by `required-features = ["experiments"]` and shouldn't conflict, but
+# `cargo run` (invoked by Tauri's DevCommand without a `--bin` flag) errored
+# `could not determine which binary to run` after the B1 directory move.
+# `default-run` makes the regular dev / build path unambiguous.
+default-run = "desktop"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 

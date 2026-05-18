@@ -1,4 +1,4 @@
-"""Unit tests for module-level helpers in bridge.workbench_bridge.
+"""Unit tests for module-level helpers in runner.workbench_bridge.
 
 Heavy integration is in test_e2e.py. This file covers pure-function helpers
 that don't need a GA subprocess: error classification and LLM name
@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import pytest
 
-from bridge.workbench_bridge import (
+from runner.workbench_bridge import (
     Bridge,
     _FenceFilter,
     _classify_error,

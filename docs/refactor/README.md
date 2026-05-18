@@ -46,7 +46,7 @@ Blocker:  无
 
 | Phase | 状态 | Cursor | 详细 playbook | Last touch |
 |---|---|---|---|---|
-| Prototype: Rust-owned subprocess | ✅ COMPLETE · 17/17 · GO | — | [bridge-owner/README.md](../../desktop/src-tauri/experiments/bridge-owner/README.md) | 2026-05-18 session 1: all 5 subsections in one sprint |
+| Prototype: Rust-owned subprocess | ✅ COMPLETE · 17/17 · GO | — | [bridge-owner/README.md](../../core/experiments/bridge-owner/README.md) | 2026-05-18 session 1: all 5 subsections in one sprint |
 | B1: Rust core 骨架 + CLI 只读 | ⏳ 启动中 | (T1.1 目录重组) | [B1-rust-core.md](./B1-rust-core.md) | 2026-05-18 cleared by prototype GO |
 | B2: Bridge ownership 迁 Rust | ⏳ 未启动 | — | [B2-bridge-ownership.md](./B2-bridge-ownership.md) (stub) | 2026-05-15 stub |
 | B3: useAppStore 拆 slice + 改订阅 | ⏳ 未启动 | — | [B3-store-slice.md](./B3-store-slice.md) (stub) | 2026-05-15 stub |

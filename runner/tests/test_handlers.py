@@ -16,7 +16,7 @@ import pytest
 # Importing handlers requires GA on sys.path (conftest handles that).
 # Import inside fixtures/tests would also work; module-level is fine since
 # conftest runs before test collection.
-from bridge.handlers import (
+from runner.handlers import (
     DEFAULT_APPROVAL_TOOLS,
     WorkbenchHandler,
 )

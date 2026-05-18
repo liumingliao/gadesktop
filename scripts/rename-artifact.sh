@@ -53,7 +53,7 @@ case "$TARGET" in
 esac
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-DIR="$REPO_ROOT/desktop/src-tauri/target/$TARGET/release/bundle/$BUNDLE_DIR_NAME"
+DIR="$REPO_ROOT/core/target/$TARGET/release/bundle/$BUNDLE_DIR_NAME"
 
 if [[ ! -d "$DIR" ]]; then
   echo "[rename-artifact] bundle dir not found: $DIR" >&2

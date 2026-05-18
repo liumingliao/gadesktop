@@ -89,7 +89,7 @@ jobs:
           # Pin major version explicitly — the action's
           # auto-detection from `packageManager` looks at
           # `./package.json` (repo root) by default, but Galley's
-          # frontend package.json lives at desktop/package.json.
+          # frontend package.json lives at gui/package.json.
           # Bumping pnpm locally → bump this line too.
           version: 10
 
@@ -98,7 +98,7 @@ jobs:
         with:
           node-version: 20
           cache: pnpm
-          cache-dependency-path: desktop/pnpm-lock.yaml
+          cache-dependency-path: gui/pnpm-lock.yaml
 
       - name: Setup Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -108,18 +108,18 @@ jobs:
       - name: Rust cache
         uses: swatinem/rust-cache@v2
         with:
-          workspaces: ./desktop/src-tauri -> target
+          workspaces: ./core -> target
 
       - name: Install frontend deps
-        working-directory: ./desktop
+        working-directory: ./gui
         run: pnpm install --frozen-lockfile
 
       - name: Typecheck
-        working-directory: ./desktop
+        working-directory: ./gui
         run: pnpm typecheck
 
       - name: Lint
-        working-directory: ./desktop
+        working-directory: ./gui
         run: pnpm lint
 
       # Mac Intel cross-compile uses x86_64 PBS Python on the arm64
@@ -137,7 +137,7 @@ jobs:
       # $RESOURCE/python/. `scripts/bundle-python.sh` downloads the
       # python-build-standalone tarball, strips non-essential stdlib,
       # and pip-installs GA's four deps. Output lands in
-      # desktop/src-tauri/python-bundle/python/, which tauri.conf.json's
+      # core/python-bundle/python/, which tauri.conf.json's
       # bundle.resources mapping copies into the .app / NSIS payload.
       #
       # MUST run before Cargo check / Build: Tauri's build.rs validates
@@ -169,11 +169,11 @@ jobs:
           ./scripts/bundle-python.sh "$ARCH"
 
       - name: Cargo check
-        working-directory: ./desktop/src-tauri
+        working-directory: ./core
         run: cargo check --target ${{ matrix.target }}
 
       - name: Build Tauri bundle
-        working-directory: ./desktop
+        working-directory: ./gui
         run: pnpm tauri build --target ${{ matrix.target }}
 
       # Tauri's bundler names artifacts `Galley_<version>_<arch>.<ext>`
@@ -189,7 +189,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: galley-${{ matrix.platform }}-${{ matrix.arch }}
-          path: desktop/src-tauri/target/${{ matrix.target }}/release/bundle/${{ matrix.bundle_dir }}/${{ matrix.bundle_glob }}
+          path: core/target/${{ matrix.target }}/release/bundle/${{ matrix.bundle_dir }}/${{ matrix.bundle_glob }}
           if-no-files-found: error
 
   release:

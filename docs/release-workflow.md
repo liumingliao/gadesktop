@@ -68,13 +68,13 @@ Semver 0.x.y，pre-1.0 阶段：
 把版本号同步改两处：
 
 ```bash
-# desktop/package.json
+# gui/package.json
 "version": "0.2.0"
 
-# desktop/src-tauri/tauri.conf.json
+# core/tauri.conf.json
 "version": "0.2.0"
 
-# desktop/src-tauri/Cargo.toml (如果显式声明了 version，目前 = 0.1.0 跟其它解耦)
+# core/Cargo.toml (如果显式声明了 version，目前 = 0.1.0 跟其它解耦)
 # v0.2 是否同步 Cargo.toml 看具体情况：Cargo.toml 的 version 是 lib name，
 # 不直接影响 bundle 文件名（那个由 tauri.conf.json + package.json 决定）。
 # 建议同步以免日后查问题困惑。
@@ -295,9 +295,9 @@ gh run download <run-id> -n galley-macos-15-aarch64   # 出 Galley_X.Y.Z_macOS_a
 gh run download <run-id> -n galley-windows-latest-x64 # 出 Galley_X.Y.Z_Windows_x64-setup.exe
 
 # 2b. 本地 build 兜 self-arch（Mac x64 / aarch64）— 别忘了重命名
-cd desktop && pnpm tauri build --target x86_64-apple-darwin
+cd gui && pnpm tauri build --target x86_64-apple-darwin
 ../scripts/rename-artifact.sh x86_64-apple-darwin
-# 产物：src-tauri/target/x86_64-apple-darwin/release/bundle/dmg/Galley_X.Y.Z_macOS_x64.dmg
+# 产物：core/target/x86_64-apple-darwin/release/bundle/dmg/Galley_X.Y.Z_macOS_x64.dmg
 
 # 3. 起草 release notes 到 /tmp/galley-<tag>-notes.md
 # 模板见 "Announcement templates" 一节
@@ -353,7 +353,7 @@ GitHub Actions 偶发某些 runner 排队。等 5-10 min 通常自然解决。
 
 ### Symptom: tauri build 在 Win 报 NSIS 缺资源
 
-`bundle.windows.nsis.installerIcon` 路径错。检查 `desktop/src-tauri/tauri.conf.json` 的 icon 配置。
+`bundle.windows.nsis.installerIcon` 路径错。检查 `core/tauri.conf.json` 的 icon 配置。
 
 ### Symptom: 产物 artifact 上传后 `release` job 找不到
 

@@ -1,11 +1,11 @@
-"""Schema round-trip and validation tests for bridge.ipc."""
+"""Schema round-trip and validation tests for runner.ipc."""
 from __future__ import annotations
 
 import json
 
 import pytest
 
-from bridge.ipc import (
+from runner.ipc import (
     PROTOCOL_VERSION,
     AbortCommand,
     ApprovalResponseCommand,

@@ -183,7 +183,7 @@ function App() {
     return () => window.removeEventListener("keydown", onKey);
   }, [togglePalette, setSettingsOpen, setScreen]);
 
-  // macOS menubar bridge: src-tauri/src/lib.rs installs a native menu
+  // macOS menubar bridge: core/src/lib.rs installs a native menu
   // on Mac that emits `menu:<id>` events. We subscribe and route each
   // to the same store action the keyboard shortcut would trigger.
   //

@@ -17,7 +17,7 @@ requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
-include = ["bridge*"]
+include = ["runner*"]
 
 [tool.mypy]
 python_version = "3.10"
@@ -26,7 +26,7 @@ warn_return_any = true
 warn_unused_configs = true
 
 [[tool.mypy.overrides]]
-module = ["bridge.tests.*"]
+module = ["runner.tests.*"]
 disallow_untyped_decorators = false
 
 [[tool.mypy.overrides]]
@@ -36,7 +36,7 @@ module = ["agent_loop", "ga", "agentmain"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]
-testpaths = ["bridge/tests"]
+testpaths = ["runner/tests"]
 python_files = "test_*.py"
 addopts = "-v -m \"not e2e\""
 markers = [
@@ -53,4 +53,4 @@ select = ["E", "F", "W", "I", "B", "UP", "N"]
 [tool.ruff.lint.per-file-ignores]
 # ipc.py uses camelCase field names to match the JSON wire format directly
 # (see docs/ipc-protocol.md). This avoids name remapping at serialization time.
-"bridge/ipc.py" = ["N815"]
+"runner/ipc.py" = ["N815"]

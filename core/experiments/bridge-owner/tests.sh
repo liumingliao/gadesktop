@@ -1,16 +1,16 @@
 #!/usr/bin/env bash
 # Bridge-owner experiment runner.
 #
-# Run from genericagent-webui/desktop/src-tauri (so cargo finds Cargo.toml)
-# OR from genericagent-webui (so the binary's default cwd is right).
+# Run from genericagent-webui/core (so cargo finds Cargo.toml) OR from
+# genericagent-webui (so the binary's default cwd is right).
 #
 # Each scenario sets cwd to the workbench repo root and points GA_PATH at
 # JC's GA checkout. Override via env vars if those defaults are wrong.
 
 set -uo pipefail
 
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)"
-SRC_TAURI="$REPO_ROOT/desktop/src-tauri"
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+CORE_DIR="$REPO_ROOT/core"
 
 GA_PATH="${GA_PATH:-$HOME/Documents/GenericAgent}"
 PYTHON="${PYTHON:-python3}"
@@ -24,14 +24,14 @@ echo "[runner] scenario  = $scenario"
 echo
 
 # Build once (cached if unchanged)
-( cd "$SRC_TAURI" && cargo build --features experiments --bin bridge-owner-experiment ) || {
+( cd "$CORE_DIR" && cargo build --features experiments --bin bridge-owner-experiment ) || {
     echo "[runner] build failed"
     exit 1
 }
 
-BIN="$SRC_TAURI/target/debug/bridge-owner-experiment"
+BIN="$CORE_DIR/target/debug/bridge-owner-experiment"
 
-# Run from repo root so Python's `-m bridge.workbench_bridge` resolves.
+# Run from repo root so Python's `-m runner.workbench_bridge` resolves.
 cd "$REPO_ROOT"
 GA_PATH="$GA_PATH" PYTHON="$PYTHON" "$BIN" "$scenario"
 exit_code=$?

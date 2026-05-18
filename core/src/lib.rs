@@ -5,7 +5,7 @@ use tauri_plugin_sql::{Migration, MigrationKind};
 ///
 ///   macOS:  ~/Library/Application Support/app.gaworkbench/
 ///
-/// Schema lives in src-tauri/migrations/001_init.sql; tauri-plugin-sql
+/// Schema lives in core/migrations/001_init.sql; tauri-plugin-sql
 /// runs Up migrations in version order on first connect.
 const DB_URL: &str = "sqlite:workbench.db";
 

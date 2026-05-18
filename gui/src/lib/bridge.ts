@@ -48,7 +48,7 @@ export interface BridgeSpawnArgs {
   cwd?: string;
   /**
    * Working directory for the bridge process itself. Should be the
-   * Workbench repo root so `python -m bridge.workbench_bridge`
+   * Workbench repo root so `python -m runner.workbench_bridge`
    * resolves the package.
    */
   bridgeCwd?: string;
@@ -102,7 +102,7 @@ export async function spawnBridge(
     : (args.python ?? (isWindows ? "python" : "python3"));
   const argv = [
     "-m",
-    "bridge.workbench_bridge",
+    "runner.workbench_bridge",
     "--ga-path",
     args.gaPath,
     "--session-id",
@@ -112,14 +112,14 @@ export async function spawnBridge(
   if (args.llmIndex !== undefined) argv.push("--llm-no", String(args.llmIndex));
 
   // bridgeCwd resolution:
-  //   - production (packaged .app): we bundle the `bridge/` package
+  //   - production (packaged .app): we bundle the `runner/` package
   //     into Resources/ via tauri.conf.json's bundle.resources
-  //     mapping. Python's `-m bridge.workbench_bridge` needs that
+  //     mapping. Python's `-m runner.workbench_bridge` needs that
   //     Resources/ dir as cwd to discover the package. resourceDir()
   //     points at .app/Contents/Resources/.
   //   - dev (`pnpm tauri dev`): args.bridgeCwd is the workbench repo
   //     root (set by demo / store gaConfig), which contains the
-  //     real `bridge/` source.
+  //     real `runner/` source.
   const bridgeCwd = import.meta.env.PROD
     ? await resolveProductionBridgeCwd(args.bridgeCwd)
     : args.bridgeCwd;
@@ -203,9 +203,9 @@ export async function spawnBridge(
 
 /**
  * Resolve the cwd for the Python bridge process in a packaged build.
- * Tauri's `bundle.resources` maps `../../bridge` → `bridge` under
+ * Tauri's `bundle.resources` maps `../runner` → `runner` under
  * `<.app>/Contents/Resources/`; we point cwd at the Resources dir so
- * `python -m bridge.workbench_bridge` finds the package.
+ * `python -m runner.workbench_bridge` finds the package.
  *
  * Falls back to the passed `dev` value if `resourceDir()` somehow
  * fails (very unlikely in a real Tauri runtime — we still want a

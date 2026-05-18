@@ -675,10 +675,10 @@ bridge:   { kind: "turn_start", ... }
 
 ## 10. Open Items（实现阶段确认）
 
-- [x] **`load_history` messages 数据结构** — 已 e2e 验证：`NativeClaudeSession` 的 `backend.history` 是 `[{role, content: [{type:"text", text:str}, ...]}]`（Anthropic native messages 格式）。`bridge/workbench_bridge.py:_load_history` 把 desktop 传来的简单 string content 适配为 native blocks。**未验证**：`NativeOAISession` / `ClaudeSession` / `LLMSession` / `MixinSession` 的 history 形态可能不同，需要对应 adapter。当前 V0.1 只在 `NativeClaudeSession` 下保证恢复语义。
-- [ ] `tool_call_progress` 字符串解析规则（GA 当前 yield 的 emoji 前缀格式）需在 bridge 实现时记录到 `bridge/handlers.py` 注释，避免 GA 升级时格式变化无人知晓 — V0.1 暂不实现 progress 事件，turn_end 已含完整 toolCalls/toolResults
+- [x] **`load_history` messages 数据结构** — 已 e2e 验证：`NativeClaudeSession` 的 `backend.history` 是 `[{role, content: [{type:"text", text:str}, ...]}]`（Anthropic native messages 格式）。`runner/workbench_bridge.py:_load_history` 把 GUI 传来的简单 string content 适配为 native blocks。**未验证**：`NativeOAISession` / `ClaudeSession` / `LLMSession` / `MixinSession` 的 history 形态可能不同，需要对应 adapter。当前 V0.1 只在 `NativeClaudeSession` 下保证恢复语义。
+- [ ] `tool_call_progress` 字符串解析规则（GA 当前 yield 的 emoji 前缀格式）需在 runner 实现时记录到 `runner/handlers.py` 注释，避免 GA 升级时格式变化无人知晓 — V0.1 暂不实现 progress 事件，turn_end 已含完整 toolCalls/toolResults
 - [ ] images 字段的传递路径（user_message → GA put_task）需在 bridge 验证可行 — bridge 已通过 `images=cmd.images` 透传到 `agent.put_task`，但实际多模态调用未 e2e 验证
 - [x] **`abort` 路径** — GA 的 `abort()` 设 `stop_sig` 让 worker 跳出循环，但**不**触发 `turn_end_callback`。bridge 在 `dispatch_command` 收到 `AbortCommand` 时主动合成 `RunCompleteEvent` with `exitReason.result = "ABORTED"`。e2e 已验证。
-- [x] **`error` 事件结构化字段** — `category` / `severity` / `retryable` / `hint` 四字段在 v0.1 落地（见 §4.10）。bridge 端 LLM 调用错误的 hint 推断逻辑见 `bridge/workbench_bridge.py` 的 `_classify_error`。
+- [x] **`error` 事件结构化字段** — `category` / `severity` / `retryable` / `hint` 四字段在 v0.1 落地（见 §4.10）。runner 端 LLM 调用错误的 hint 推断逻辑见 `runner/workbench_bridge.py` 的 `_classify_error`。
 - [ ] **`file_patch` Approval Card diff 视图** — desktop 端用 `@pierre/diffs` 渲染。args 字典已含 `path` / `old_content` / `new_content` 三元组（GA 原生 signature），bridge 不需要额外处理；ToolCalled / tool_call_pending 事件结构无需扩展。Stage 2 desktop 实现时落地。
 - [ ] **`file_write` 内容预览限制** — GA `do_file_write` 在 `dispatch` 之后才从 `response.content` 通过 `extract_robust_content` 提取实际内容；审批拦截时拿不到内容。V0.1 不做内容预览（违反 non-invasive 第 4 条）；V0.2+ 可考虑给 GA 上游提 PR 让 extract 前置。

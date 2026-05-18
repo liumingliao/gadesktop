@@ -112,7 +112,7 @@ def bridge_proc() -> Iterator[_BridgeProc]:
         pytest.skip(f"GA_PATH not found: {GA_PATH}")
 
     env = os.environ.copy()
-    # The subprocess will `import bridge.workbench_bridge`, which needs the
+    # The subprocess will `import runner.workbench_bridge`, which needs the
     # repo root on its module search path.
     env["PYTHONPATH"] = (
         str(REPO_ROOT) + os.pathsep + env.get("PYTHONPATH", "")
@@ -121,7 +121,7 @@ def bridge_proc() -> Iterator[_BridgeProc]:
     proc = subprocess.Popen(
         [
             BRIDGE_PYTHON,
-            "-m", "bridge.workbench_bridge",
+            "-m", "runner.workbench_bridge",
             "--ga-path", GA_PATH,
             "--session-id", "test_e2e_sess",
         ],

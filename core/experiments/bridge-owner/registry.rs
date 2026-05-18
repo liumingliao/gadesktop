@@ -36,7 +36,7 @@ impl BridgeProcess {
         let mut child = Command::new(python)
             .args([
                 "-m",
-                "bridge.workbench_bridge",
+                "runner.workbench_bridge",
                 "--ga-path",
                 ga_arg,
                 "--session-id",

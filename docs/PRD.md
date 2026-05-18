@@ -229,9 +229,9 @@ type ConversationMessage = {
 
 | 职责 | v0.1 在哪 | v0.5 在哪 |
 |---|---|---|
-| SQLite 读写 | TypeScript (`desktop/src/lib/db.ts` 778 行) | Rust (Galley Core)，TypeScript 改为通过 invoke 调用 |
-| Bridge 子进程 spawn / 管理 | TypeScript (`desktop/src/lib/bridge.ts` 203 行) | Rust (Galley Core) 持有 child handle |
-| IPC event 分发 | TypeScript (`desktop/src/lib/ipc-handlers.ts` 1011 行) | Rust (Galley Core) emit event 到所有 subscriber |
+| SQLite 读写 | TypeScript (`gui/src/lib/db.ts` 778 行) | Rust (Galley Core)，TypeScript 改为通过 invoke 调用 |
+| Bridge 子进程 spawn / 管理 | TypeScript (`gui/src/lib/bridge.ts` 203 行) | Rust (Galley Core) 持有 child handle |
+| IPC event 分发 | TypeScript (`gui/src/lib/ipc-handlers.ts` 1011 行) | Rust (Galley Core) emit event 到所有 subscriber |
 | 命令调度 | TypeScript (Zustand store actions, 2727 行 store 一部分) | Rust (Galley Core) 暴露 trait |
 | 状态管理 (authority) | TypeScript (Zustand store) | Rust (Galley Core) 内部 state，前端订阅 |
 | UI state (selected session, modals open, etc.) | TypeScript (Zustand store) | TypeScript (拆 slice 后保留) |
@@ -466,7 +466,7 @@ migration 失败 → app 拒绝启动 + 显示错误页面：
 |---|---|---|
 | v0.1 Mac release | 5月下旬 | 现有代码出包 (.app + .dmg) |
 | v0.2 Windows | 6-7月 | NSIS .exe + Win/Mac 跨平台 |
-| Prototype: Rust-owned subprocess | B1 前 2-3 天 | throwaway 验证（详见 [prototype spec](../desktop/src-tauri/experiments/bridge-owner/README.md)） |
+| Prototype: Rust-owned subprocess | B1 前 2-3 天 | throwaway 验证（详见 [prototype spec](../core/experiments/bridge-owner/README.md)） |
 | B1: Rust core 骨架 + CLI 只读 | 3w | 目录重组、core/cli/gui/runner 四目录、6 个 read 命令 |
 | B2: Runner ownership 迁 Rust | 3w | Rust 持 child handle，CLI send_message 写命令 |
 | B3: useAppStore 拆 slice 改订阅 | 3-4w | GUI 改 presenter，最 risky 阶段 |

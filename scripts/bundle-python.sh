@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # bundle-python.sh — download python-build-standalone + install GA deps,
 # write a self-contained Python distribution to
-# desktop/src-tauri/python-bundle/<arch>/python/ ready to be picked up
+# core/python-bundle/python/ ready to be picked up
 # by tauri.conf.json's bundle.resources mapping.
 #
 # Phase 0 (POC) scope: Mac x64 only. Phases 1+ will add mac-arm64,
@@ -52,7 +52,7 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # script with a different arch to retarget. CI does this per matrix
 # entry; locally JC re-bundles when switching between mac-x64 (his
 # dev machine) and any cross-compile target.
-OUT_DIR="${REPO_ROOT}/desktop/src-tauri/python-bundle"
+OUT_DIR="${REPO_ROOT}/core/python-bundle"
 CACHE_DIR="${REPO_ROOT}/.cache/pbs"
 
 echo "[bundle-python] arch=${ARCH} triple=${PBS_TRIPLE}"

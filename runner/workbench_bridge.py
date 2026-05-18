@@ -4,7 +4,7 @@ Run as a subprocess. Reads JSON Lines commands on stdin, writes JSON Lines
 events on stdout. See docs/ipc-protocol.md for the wire format.
 
 Usage:
-    python -m bridge.workbench_bridge \\
+    python -m runner.workbench_bridge \\
         --ga-path /Users/me/Documents/GenericAgent \\
         --session-id sess_abc \\
         [--cwd /path/to/project] \\
@@ -30,7 +30,7 @@ import uuid
 from pathlib import Path
 from typing import IO, Any
 
-from bridge.ipc import (
+from runner.ipc import (
     PROTOCOL_VERSION,
     AbortCommand,
     ApprovalResponseCommand,
@@ -552,7 +552,7 @@ class Bridge:
             )
 
     def _install_handler_subclass(self) -> None:
-        from bridge.handlers import WorkbenchHandler
+        from runner.handlers import WorkbenchHandler
 
         bridge_self = self
 
@@ -900,7 +900,7 @@ class Bridge:
     # ---------------- Approval request (called from worker thread) ----------------
 
     def _request_approval(self, tool_name: str, args: dict[str, Any]) -> str:
-        from bridge.handlers import APPROVAL_REASONS, RISK_LEVELS
+        from runner.handlers import APPROVAL_REASONS, RISK_LEVELS
 
         approval_id = f"appr_{uuid.uuid4().hex[:12]}"
         pending = self.state.register_pending(approval_id)
@@ -1446,7 +1446,7 @@ class Bridge:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(prog="bridge.workbench_bridge")
+    parser = argparse.ArgumentParser(prog="runner.workbench_bridge")
     parser.add_argument("--ga-path", required=True)
     parser.add_argument("--session-id", required=True)
     parser.add_argument("--cwd", default=None)

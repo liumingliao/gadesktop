@@ -1,10 +1,10 @@
 # B1 · Rust core 骨架 + CLI 只读
 
 ```
-Cursor:   T1.1  (目录重组第一步 · git mv src-tauri → core)
-Status:   ⏳ 未启动
-Started:  -
-Last touch: 2026-05-15 playbook drafted
+Cursor:   T1.15  (一次性大 commit · 准备就绪)
+Status:   🚧 启动中 (M1 90% — T1.1–T1.14 done, commit pending)
+Started:  2026-05-18
+Last touch: 2026-05-18 M1 rename + all 4 gates pass + dogfood OK
 Predecessor: Prototype (bridge-owner) 全部 checklist pass
 Successor:   B2 (bridge ownership 迁 Rust)
 Duration:    3 周 (D1-D15)
@@ -20,9 +20,9 @@ Duration:    3 周 (D1-D15)
 
 - [x] PRD v0.3 已 ship（产品定位锁定，目录命名锁定）
 - [x] CLAUDE.md Galley 架构原则 4 条已 ship
-- [x] [bridge-owner prototype spec](../../desktop/src-tauri/experiments/bridge-owner/README.md) 已写
-- [ ] **bridge-owner prototype 全 checklist pass + P1/P2 基线数据已记录**（B1 acceptance 复用这个基线）
-- [ ] v0.2 Windows release 已 ship（main 进入 frozen-feature 状态，可以开始大改）
+- [x] [bridge-owner prototype spec](../../core/experiments/bridge-owner/README.md) 已写
+- [x] **bridge-owner prototype 全 checklist pass + P1/P2 基线数据已记录**（B1 acceptance 复用这个基线）— 2026-05-18 17/17 PASS
+- [x] v0.2 Windows release 已 ship（main 进入 frozen-feature 状态，可以开始大改）— JC 2026-05-18 确认
 
 **未达 prerequisites 不允许启动 B1**。每一条都要打勾才能开 T1.1。
 
@@ -67,28 +67,28 @@ Duration:    3 周 (D1-D15)
 
 ### Sub-tasks
 
-- [ ] **T1.1** `git mv desktop/src-tauri core` — 把 Rust 端目录从 `desktop/src-tauri/` 移到 repo 根 `core/`。**注意**：原来 `desktop/src-tauri/` 是 `desktop/` 的子目录，新结构 `core/` 是 repo 根级别——这是结构性变化，不只是改名
-- [ ] **T1.2** `git mv desktop gui` — React 目录改名
-- [ ] **T1.3** `git mv bridge runner` — Python 目录改名
-- [ ] **T1.4** 新建 `cli/` 目录 + 空 `cli/Cargo.toml` + `cli/src/main.rs` placeholder（一句 `fn main() { println!("galley v0.1.0-dev"); }`）
-- [ ] **T1.5** 更新 `core/tauri.conf.json`：
+- [x] **T1.1** `git mv desktop/src-tauri core` — 把 Rust 端目录从 `desktop/src-tauri/` 移到 repo 根 `core/`。**注意**：原来 `desktop/src-tauri/` 是 `desktop/` 的子目录，新结构 `core/` 是 repo 根级别——这是结构性变化，不只是改名
+- [x] **T1.2** `git mv desktop gui` — React 目录改名
+- [x] **T1.3** `git mv bridge runner` — Python 目录改名
+- [x] **T1.4** 新建 `cli/` 目录 + 空 `cli/Cargo.toml` + `cli/src/main.rs` placeholder（一句 `fn main() { println!("galley v0.1.0-dev"); }`）
+- [x] **T1.5** 更新 `core/tauri.conf.json`：
   - `build.frontendDist`: `../dist` → `../gui/dist`
   - `build.beforeDevCommand`: `pnpm dev` 仍跑（但要在 gui/ 下），改成 `cd ../gui && pnpm dev` 或调整 pnpm 工作目录
   - `build.beforeBuildCommand`: 同上
   - **不动** `identifier: "app.galley"`（CLAUDE.md 宪法）
   - bundle resource 引用（如有引用 `../bridge` 的，改为 `../runner`）
-- [ ] **T1.6** 更新 `gui/vite.config.ts`：把 `root` / `build.outDir` 校准到新位置
-- [ ] **T1.7** 更新 `gui/package.json` scripts：`tauri` 命令的 `--config` 或 cwd 校准
-- [ ] **T1.8** 更新 `gui/tsconfig.json` paths（若有 `../bridge/` 引用）
-- [ ] **T1.9** 全仓 grep 替换 import 引用：
+- [x] **T1.6** 更新 `gui/vite.config.ts`：把 `root` / `build.outDir` 校准到新位置
+- [x] **T1.7** 更新 `gui/package.json` scripts：`tauri` 命令的 `--config` 或 cwd 校准
+- [x] **T1.8** 更新 `gui/tsconfig.json` paths（若有 `../bridge/` 引用）
+- [x] **T1.9** 全仓 grep 替换 import 引用：
   - Python: `from bridge.X` → `from runner.X`（runner/ 内部 + runner/tests/*）
   - TypeScript: `'../bridge/...'` → `'../runner/...'` 或绝对路径变体
   - Rust: 如果 core/src 里有 `include_str!("../bridge/...")` 之类，改为 `../runner/...`
-- [ ] **T1.10** 更新 GitHub Actions workflows：
+- [x] **T1.10** 更新 GitHub Actions workflows：
   - `.github/workflows/release.yml`：每个 `cd desktop` / `cd src-tauri` / `cd bridge` 改为新路径
   - `.github/workflows/check.yml`：同上
   - 验证 yml 仍合法 (`gh workflow view`)
-- [ ] **T1.11** 更新 docs 路径引用：
+- [x] **T1.11** 更新 docs 路径引用：
   - `CLAUDE.md` 里所有 `desktop/`、`src-tauri/`、`bridge/` 路径
   - `docs/PRD.md` 同上
   - `docs/DESIGN.md` 同上（grep）
@@ -96,9 +96,9 @@ Duration:    3 周 (D1-D15)
   - `docs/windows-build-checklist.md` 同上
   - `docs/ipc-protocol.md` 同上
   - 现有 devlog 引用（这些可以**不动**——devlog 是历史快照，路径就是当时的真实路径）
-- [ ] **T1.12** 更新 `core/migrations/`（原 `desktop/src-tauri/migrations/`）的 `include_str!` 路径——如果 lib.rs 用相对路径，可能就 OK；double check
-- [ ] **T1.13** 跑全套：`cd gui && pnpm typecheck && pnpm lint`，`cd core && cargo check`，`cd runner && python -m pytest`，全过
-- [ ] **T1.14** Dogfood：`cd gui && pnpm tauri dev` 起来，跑 v0.1 scenario 5-10 步，行为不变
+- [x] **T1.12** 更新 `core/migrations/`（原 `desktop/src-tauri/migrations/`）的 `include_str!` 路径——如果 lib.rs 用相对路径，可能就 OK；double check
+- [x] **T1.13** 跑全套：`cd gui && pnpm typecheck && pnpm lint`，`cd core && cargo check`，`cd runner && python -m pytest`，全过
+- [x] **T1.14** Dogfood：`cd gui && pnpm tauri dev` 起来，跑 v0.1 scenario 5-10 步，行为不变
 - [ ] **T1.15** **一次性大 commit**，message: `Refactor: directory restructure src-tauri/desktop/bridge → core/gui/runner + new cli/`，body 列出 rename 操作 + 强调 "rename only, no logic change"
 - [ ] **T1.16** Push 验证 CI 全过（特别看 windows-latest job 是否在新路径下 build 成功）
 
@@ -342,7 +342,13 @@ B1 全部 acceptance 跑过，devlog ship，B2 playbook 写好可以启动。
 
 ### Session 跑下来追加的 notes（按日期）
 
-（开 B1 前是空的，每个 session 结束追加）
+#### 2026-05-18 · M1 完整执行 + 三个 dev-mode surprise
+
+- **N1 (T1.5/T1.7)**: Tauri v2 的 `beforeDevCommand` cwd ≠ tauri.conf.json 所在目录。实测 Tauri 跑 `beforeDevCommand` 时的 cwd 是 `<tauri-conf-dir>/..`（"frontend dir" / 仓库根），不是 tauri.conf.json 那一层。这意味着 v0.1 conventional layout 下 `desktop/src-tauri/tauri.conf.json` 跑 `pnpm dev` 时 cwd = `desktop/`，恰好就是 frontend 目录，所以"work by convention"。**B1 新 layout 下** `core/tauri.conf.json` 的 parent 是 repo 根，要么把 frontend command 写成相对仓库根的路径（`pnpm --dir gui dev` ✓）要么用 BeforeDevCommand 的 object form 显式指定 cwd。当前选了前者更省事。`frontendDist` 反而是相对 tauri.conf.json 解析（`../gui/dist` 没动）—— 同一份 conf 文件里两个字段用两套 anchor，**坑点**。
+- **N2 (T1.4)**: `core/Cargo.toml` 有两个 `[[bin]]`（`desktop` + `bridge-owner-experiment`，后者 `required-features = ["experiments"]`）。即便后者没启用 feature，cargo 仍把它列在 "available binaries" 里，导致 `cargo run` 不知道该 run 哪个。**修法**：`[package].default-run = "desktop"`。**这条 latent bug 跟 B1 rename 无关** —— 自 prototype 阶段 (commit `8d4769c`) 加入第二个 `[[bin]]` 起就存在，但 JC 一直在 .app 上 dogfood (Stage 3.13)，没碰 `pnpm tauri dev`，所以今天 M1 dogfood 才暴露。
+- **N3 (T1.13)**: `cargo clean` 是 rename 后必须的——target/ 下的 `tauri-2ae80f7624b13eea/out/permissions/...` 缓存了 `desktop/src-tauri/...` 老路径，不 clean 就 `failed to read plugin permissions: ... No such file or directory`。
+- **N4 (T1.11)**: `gui/src/stores/demo.ts` 里有 demo fixture content 引用 `desktop/src/db/migrations/...`，是历史虚构内容（不是真实代码路径），保留不动 —— "克制" 原则，rename 阶段不动 demo strings。
+- **N5 (T1.1-T1.3)**: 三个 `git mv` 打包到一个 M1 commit 而非按 invariants.md §I4 拆三个独立 commit。JC 2026-05-18 显式选择按 playbook T1.15 走 1-commit 路径；invariants.md §I4 跟 B1 playbook T1.15 文档内部矛盾，留 **open task: 调和 §I4 vs T1.15**（删一个或互相援引/限定 scope）。
 
 ---
 

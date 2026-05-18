@@ -52,7 +52,7 @@ jobs:
         with:
           node-version: 20
           cache: pnpm
-          cache-dependency-path: desktop/pnpm-lock.yaml
+          cache-dependency-path: gui/pnpm-lock.yaml
 
       - name: Setup Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -62,20 +62,20 @@ jobs:
       - name: Rust cache
         uses: swatinem/rust-cache@v2
         with:
-          workspaces: ./desktop/src-tauri -> target
+          workspaces: ./core -> target
 
       - name: Install frontend deps
-        working-directory: ./desktop
+        working-directory: ./gui
         run: pnpm install --frozen-lockfile
 
       - name: Typecheck
-        working-directory: ./desktop
+        working-directory: ./gui
         run: pnpm typecheck
 
       - name: Lint
-        working-directory: ./desktop
+        working-directory: ./gui
         run: pnpm lint
 
       - name: Cargo check
-        working-directory: ./desktop/src-tauri
+        working-directory: ./core
         run: cargo check --target ${{ matrix.target }}

@@ -4,10 +4,10 @@
   "version": "0.1.1-alpha.1",
   "identifier": "app.galley",
   "build": {
-    "beforeDevCommand": "pnpm dev",
+    "beforeDevCommand": "pnpm --dir gui dev",
     "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": "pnpm build",
-    "frontendDist": "../dist"
+    "beforeBuildCommand": "pnpm --dir gui build",
+    "frontendDist": "../gui/dist"
   },
   "app": {
     "windows": [
@@ -42,7 +42,7 @@
       "icons/icon.ico"
     ],
     "resources": {
-      "../../bridge": "bridge",
+      "../runner": "runner",
       "python-bundle/python": "python"
     },
     "windows": {

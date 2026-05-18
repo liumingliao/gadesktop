@@ -33,12 +33,12 @@ If `cargo` errors with "missing linker", re-run the MSVC Build Tools installer a
 
 ```powershell
 git clone https://github.com/wangjc683/galley.git
-cd galley\desktop
+cd galley\gui
 pnpm install
 pnpm tauri build
 ```
 
-Artifacts land in `src-tauri\target\release\bundle\`:
+Artifacts land in `core\target\release\bundle\`:
 
 - `nsis\Galley_0.1.0_x64-setup.exe` — installer (~50-80 MB depending on WebView2 inclusion)
 - `msi\Galley_0.1.0_x64_en-US.msi` — only if `"msi"` is added to bundle targets (not default)
