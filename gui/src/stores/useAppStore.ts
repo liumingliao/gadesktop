@@ -1252,15 +1252,46 @@ export const useAppStore = create<AppStore>((set, get) => ({
           llmDisplayName: state.llmDisplayName,
         };
       }
-      // Lazy-init the runtime so subsequent setters can operate on
-      // the initialized entry rather than fall through to emptyRuntime.
+      // Pre-seed a fresh runtime's `llms` / `llmDisplayName` from
+      // the hydrate-cached real LLM list + the session's persisted
+      // LLM choice (`selectedLlmIndex` / `selectedLlmDisplayName`
+      // added in 9c36f42). Without this, emptyRuntime()'s DEMO_LLMS
+      // would project to top-level via projectionFrom(rt) below AND
+      // again via every applyRuntimeUpdate that fires before bridge
+      // ready (setBridgeStatus inside spawnBridge being the first),
+      // flashing "Claude Sonnet 4.5" for ~430ms — or longer, when
+      // bridge never reaches ready, the runtime stays DEMO forever.
+      // The pre-seed makes the runtime itself authoritative, so
+      // every subsequent projection is correct.
+      const sessionIndex = state.sessions.findIndex((s) => s.id === id);
+      const sessionForActivate =
+        sessionIndex !== -1 ? state.sessions[sessionIndex] : null;
+      const persistedIndex = sessionForActivate?.selectedLlmIndex;
+      const persistedDisplayName =
+        sessionForActivate?.selectedLlmDisplayName;
+      const haveCachedLLMs = state.llms.length > 0;
       const existing = state._runtimes[id];
-      const rt = existing ?? emptyRuntime();
+      const seedLLMs: LLMOption[] = haveCachedLLMs
+        ? state.llms.map((l) => ({
+            ...l,
+            isCurrent:
+              persistedIndex !== undefined
+                ? l.index === persistedIndex
+                : l.isCurrent,
+          }))
+        : emptyRuntime().llms;
+      const seedDisplayName = haveCachedLLMs
+        ? (persistedDisplayName ?? state.llmDisplayName)
+        : emptyRuntime().llmDisplayName;
+      const rt = existing ?? {
+        ...emptyRuntime(),
+        llms: seedLLMs,
+        llmDisplayName: seedDisplayName,
+      };
       const _runtimes = existing
         ? state._runtimes
         : { ...state._runtimes, [id]: rt };
       // Clear has_unread on the activated session.
-      const sessionIndex = state.sessions.findIndex((s) => s.id === id);
       let sessions = state.sessions;
       if (sessionIndex !== -1) {
         const s = state.sessions[sessionIndex];
@@ -1271,41 +1302,11 @@ export const useAppStore = create<AppStore>((set, get) => ({
           toPersist = cleared;
         }
       }
-      // Suppress the ~430ms "Claude Sonnet 4.5" flash on first
-      // activation of a session in this app instance.
-      // `projectionFrom(emptyRuntime())` would overwrite the
-      // hydrate-cached `state.llms` / `state.llmDisplayName` with
-      // DEMO_LLMS, then bridge `ready` corrects it ~430ms later.
-      // For new runtimes, preserve the cached real list and prefer
-      // the session's persisted LLM choice for the pill (added in
-      // commit 9c36f42). Existing runtimes already hold the right
-      // values — leave them alone.
-      const sessionAfterClear =
-        sessionIndex !== -1 ? sessions[sessionIndex] : null;
-      const persistedIndex = sessionAfterClear?.selectedLlmIndex;
-      const persistedDisplayName = sessionAfterClear?.selectedLlmDisplayName;
-      const newRuntimeOverride: Partial<{
-        llms: LLMOption[];
-        llmDisplayName: string;
-      }> = existing
-        ? {}
-        : {
-            llms:
-              persistedIndex !== undefined && state.llms.length > 0
-                ? state.llms.map((l) => ({
-                    ...l,
-                    isCurrent: l.index === persistedIndex,
-                  }))
-                : state.llms,
-            llmDisplayName:
-              persistedDisplayName ?? state.llmDisplayName,
-          };
       return {
         activeSessionId: id,
         _runtimes,
         sessions,
         ...projectionFrom(rt),
-        ...newRuntimeOverride,
       };
     });
     if (toPersist) {
