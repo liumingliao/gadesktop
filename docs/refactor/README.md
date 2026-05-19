@@ -42,9 +42,12 @@ Next:     B3 M3 T3.1 — runtimeStore 抽离 (D36-D40)
           单 session 内 M3 一次性推完风险大 (拆 SessionRuntime 14 字段 +
           9 actions + cross-store onClose + 删 9 module-level symbol);
           已 defer 到 fresh session 重开
-Blocker:  M3 启动门两条 (仍 enforce, M2 override 不推广):
-          - dogfood scenarios JC 真跑过 + 签字「未发现 B2 regression」
-          - B2 perf baseline 测好落到 docs/refactor/perf-baseline.md
+Blocker:  M3 启动门 (M2 override 不推广):
+          - B2 perf baseline P1-P4 ✅ ship 2026-05-19
+            (P1 short=3.15s / long=5.36s, P2=1.42 ev/s, P3 CLI RTT 13-15ms,
+             P4 bridge spawn cited prototype 430ms cold)
+          - dogfood scenarios JC 真跑过 + 签字「未发现 B2 regression」(0/35)
+            ↑ 唯一剩下的 blocker
 ```
 
 **Cursor 更新协议**：每个 sub-task 完成 → 当前 phase playbook 顶部的 cursor 行更新 → 本文件总 cursor 表跟着更新（只 phase 级别）。**不要批量更新**——每 task 一更，防止 session 中断后丢状态。
