@@ -130,9 +130,11 @@ function App() {
   const pushToast = useUiStore((s) => s.pushToast);
   const dismissToast = useUiStore((s) => s.dismissToast);
 
-  const bridgeStatus = useAppStore((s) => s.bridgeStatus);
-  const shutdownAllBridges = useAppStore((s) => s.shutdownAllBridges);
-  const sendIPCCommand = useAppStore((s) => s.sendIPCCommand);
+  const bridgeStatus = useRuntimeStore((s) =>
+    activeSessionId ? (s.byId[activeSessionId]?.bridgeStatus ?? "idle") : "idle",
+  );
+  const shutdownAllBridges = useRuntimeStore((s) => s.shutdownAllBridges);
+  const sendIPCCommand = useRuntimeStore((s) => s.sendIPCCommand);
   const setGAConfig = useAppStore((s) => s.setGAConfig);
   const gaConfig = useAppStore((s) => s.gaConfig);
   // Sidebar runtime indicator. Two states for V0.1 — see Sidebar.tsx

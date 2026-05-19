@@ -1,3 +1,4 @@
+import type { BridgeStatus } from "@/stores/runtime";
 import type { SessionRuntime } from "@/stores/useAppStore";
 import type { Session, SessionBucket, SessionStatus } from "@/types/session";
 
@@ -23,6 +24,7 @@ import type { Session, SessionBucket, SessionStatus } from "@/types/session";
 export function deriveSessionStatus(
   session: Session,
   runtime: SessionRuntime | undefined,
+  bridgeStatus?: BridgeStatus | undefined,
 ): SessionStatus {
   if (
     session.status === "archived" ||
@@ -34,8 +36,10 @@ export function deriveSessionStatus(
   if (!runtime) return session.status;
   if (runtime.pendingApprovals.length > 0) return "waiting_approval";
   if (runtime.agentRunning) return "running";
-  if (runtime.bridgeStatus === "spawning") return "connecting";
-  if (runtime.bridgeStatus === "error") return "error";
+  // bridgeStatus moved to runtimeStore in M3b — callers fetch it from
+  // useRuntimeStore.getState().byId[sid]?.bridgeStatus and pass in.
+  if (bridgeStatus === "spawning") return "connecting";
+  if (bridgeStatus === "error") return "error";
   return "idle";
 }
 

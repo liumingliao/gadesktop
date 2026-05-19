@@ -66,7 +66,7 @@ export function dispatchIPCEvent(
           isCurrent: l.isCurrent,
         })),
       );
-      s.setBridgeStatus(event.sessionId, "connected");
+      useRuntimeStore.getState().setBridgeStatus(event.sessionId, "connected");
       // Sync the user's actual GA HEAD into runtimeInfo so the
       // Settings → Runtime panel shows "GA 版本: cf65515 · 2026-05-11"
       // alongside the workbench-tested baseline. gaCommit/Date are
@@ -84,10 +84,12 @@ export function dispatchIPCEvent(
       // it's queued in the bridge's command pipeline and processed
       // before any subsequent user message can trigger a tool call.
       if (s.yoloMode) {
-        void s.sendIPCCommand(event.sessionId, {
-          kind: "set_yolo_mode",
-          enabled: true,
-        });
+        void useRuntimeStore
+          .getState()
+          .sendIPCCommand(event.sessionId, {
+            kind: "set_yolo_mode",
+            enabled: true,
+          });
       }
       // Session Restore (Stage 3 Task 3). If this session has prior
       // turn history on disk, replay it into GA `backend.history` via
@@ -103,7 +105,7 @@ export function dispatchIPCEvent(
         .getState()
         .sessions.find((x) => x.id === event.sessionId);
       if (session && (session.turnCount ?? 0) > 0) {
-        void replayHistoryToBridge(event.sessionId, store);
+        void replayHistoryToBridge(event.sessionId);
       }
       return;
     }
@@ -334,7 +336,7 @@ export function dispatchIPCEvent(
       const pendingTarget = useUiStore.getState().pendingPetMigrationTo;
       if (pendingTarget) {
         useUiStore.getState().setPendingPetMigration(null);
-        void s.sendIPCCommand(pendingTarget, {
+        void useRuntimeStore.getState().sendIPCCommand(pendingTarget, {
           kind: "attach_pet",
           port: 41983,
         });
@@ -980,16 +982,13 @@ async function persistTurnEndToMessages(event: {
  * just without GA remembering earlier turns. We log at debug so dev
  * builds see the failure without polluting the console for users.
  */
-async function replayHistoryToBridge(
-  sessionId: string,
-  store: typeof useAppStore,
-): Promise<void> {
+async function replayHistoryToBridge(sessionId: string): Promise<void> {
   try {
     const { loadMessagesBySession } = await import("@/lib/db");
     const rows = await loadMessagesBySession(sessionId);
     if (rows.length === 0) return;
     const messages = rowsToConversationMessages(rows);
-    await store.getState().sendIPCCommand(sessionId, {
+    await useRuntimeStore.getState().sendIPCCommand(sessionId, {
       kind: "load_history",
       messages,
     });

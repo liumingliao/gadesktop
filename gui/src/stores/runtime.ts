@@ -1,8 +1,10 @@
 import { create } from "zustand";
 
+import { dispatchIPCEvent } from "@/lib/ipc-handlers";
 import {
   spawnBridge as spawnBridgeProcess,
   type BridgeClient,
+  type BridgeSpawnArgs,
 } from "@/lib/bridge";
 import { persistSession, setPref } from "@/lib/db";
 import {
@@ -10,13 +12,16 @@ import {
   DEMO_LLMS,
   DEMO_RUNTIME_INFO,
 } from "@/stores/demo";
+import { useUiStore } from "@/stores/ui";
 // useAppStore is imported for getState-time access (cross-store
 // transitional reads). The import is a circular dependency at the
 // module-graph level, but neither store reads the other's value at
 // initialisation time — only inside action bodies, after both
 // modules have finished evaluating. Vite handles this correctly.
 import { useAppStore } from "@/stores/useAppStore";
+import { makeAppError } from "@/types/app-error";
 import type { RuntimeInfo } from "@/types/inspector";
+import type { IPCCommand } from "@/types/ipc";
 
 /**
  * LLM available in the bridge's GA-loaded mykey.py. Mirrors
@@ -29,8 +34,20 @@ export interface LLMOption {
 }
 
 /**
- * Per-session runtime slot. B3 M3a only carries LLM fields; M3b will
- * add `bridgeStatus / bridgeError / bridgePid`. The map is keyed by
+ * Bridge subprocess lifecycle status. Mirrors the type previously
+ * defined in useAppStore.ts (BridgeStatus); kept here now that
+ * runtimeStore owns the bridge fields.
+ */
+export type BridgeStatus =
+  | "idle"
+  | "spawning"
+  | "connected"
+  | "closed"
+  | "error";
+
+/**
+ * Per-session runtime slot. B3 M3a carried LLM fields only; M3b adds
+ * `bridgeStatus / bridgeError / bridgePid`. The map is keyed by
  * sessionId; `ensureRuntime` guarantees an entry exists before any
  * read (so selectors can return `byId[activeId].llms` without `?.`
  * chains in the hot path).
@@ -38,6 +55,9 @@ export interface LLMOption {
 export interface PerSessionRuntime {
   llms: LLMOption[];
   llmDisplayName: string;
+  bridgeStatus: BridgeStatus;
+  bridgeError: string | null;
+  bridgePid: number | null;
 }
 
 /**
@@ -111,6 +131,22 @@ interface RuntimeActions {
    * Called from `useAppStore.setActiveSession`.
    */
   ensureRuntime: (sid: string, seed: RuntimeSeedHints) => void;
+  /** Set bridge status. Used by ipc-handlers ready event. */
+  setBridgeStatus: (sid: string, status: BridgeStatus) => void;
+  /**
+   * Spawn a GA bridge subprocess for `args.sessionId`. If that session
+   * already has a live bridge, shut it down first. See useAppStore's
+   * historical doc for the LRU rationale (now enforced inside this
+   * action via the runtime-private `_bridgeClients` / `_lruOrder` maps).
+   */
+  spawnBridge: (args: BridgeSpawnArgs) => Promise<void>;
+  /** Graceful shutdown. No-op if no bridge alive for `sid`. */
+  shutdownBridge: (sid: string) => Promise<void>;
+  /** Shutdown every alive bridge — App-quit cleanup path. */
+  shutdownAllBridges: () => Promise<void>;
+  /** Send an IPC command to `sid`'s bridge over stdin. Warns + no-op
+   * if no live bridge. */
+  sendIPCCommand: (sid: string, cmd: IPCCommand) => Promise<void>;
   /**
    * Apply the LLM list reported by a bridge's `ready` / `llm_changed`
    * event. Updates byId[sid], caches the list to `llm_list` pref, and
@@ -167,10 +203,90 @@ export type RuntimeStore = RuntimeState & RuntimeActions;
  *      no `llm_list` pref), fall through to DEMO_LLMS so the picker
  *      isn't empty during onboarding.
  */
+// ---- Module-level bridge resources (private to runtime slice) ----
+//
+// These were 9 module-level symbols in useAppStore.ts (the per-AD-07
+// dead-after-B3 list). In M3b they move here as runtime-internal
+// state: bridge process handles + stderr buffers + LRU ordering.
+// Not exported — outside callers go through the actions below.
+//
+// Why module-level (not Zustand state):
+// - The `BridgeClient` value carries a tokio handle to a Tauri-side
+//   listener; not serialisable (Zustand's preferred shape).
+// - `_stderrTails` is pure diagnostic, no rendering reacts.
+// - LRU ordering is mutated frequently; keeping it out of Zustand
+//   avoids triggering subscribers on every spawn/touch.
+
+const _bridgeClients = new Map<string, BridgeClient>();
+const _stderrTails = new Map<string, string[]>();
+const _STDERR_TAIL_MAX = 8;
+const _lruOrder: string[] = [];
+const LRU_CAP = 5;
+
+function _lruTouch(sessionId: string): void {
+  const idx = _lruOrder.indexOf(sessionId);
+  if (idx !== -1) _lruOrder.splice(idx, 1);
+  _lruOrder.push(sessionId);
+}
+
+function _lruRemove(sessionId: string): void {
+  const idx = _lruOrder.indexOf(sessionId);
+  if (idx !== -1) _lruOrder.splice(idx, 1);
+}
+
+async function _enforceLRUCap(): Promise<void> {
+  while (_lruOrder.length > LRU_CAP) {
+    // TRANSITIONAL (M5 messagesStore): `agentRunning` still lives in
+    // useAppStore._runtimes[id].agentRunning. After M5, switch to
+    // `useMessagesStore.getState().byId[id]?.agentRunning`.
+    const appState = useAppStore.getState();
+    const activeId = appState.activeSessionId;
+    const victim = _lruOrder.find(
+      (id) => id !== activeId && !appState._runtimes[id]?.agentRunning,
+    );
+    if (!victim) {
+      console.info(
+        `[lru] no eviction candidate (cap=${LRU_CAP}, alive=${_lruOrder.length}); all alive bridges are active or running`,
+      );
+      return;
+    }
+    try {
+      await useRuntimeStore.getState().shutdownBridge(victim);
+    } catch (e) {
+      console.warn(`[lru] shutdown of ${victim} failed:`, e);
+      _lruRemove(victim); // force-unblock even if shutdown threw
+    }
+  }
+}
+
+function _bridgeFieldsUpdate(
+  rt: PerSessionRuntime | undefined,
+  patch: Partial<Pick<PerSessionRuntime, "bridgeStatus" | "bridgeError" | "bridgePid">>,
+): PerSessionRuntime {
+  return {
+    llms: rt?.llms ?? DEMO_LLMS,
+    llmDisplayName: rt?.llmDisplayName ?? DEMO_LLM_DISPLAY_NAME,
+    bridgeStatus: patch.bridgeStatus ?? rt?.bridgeStatus ?? "idle",
+    bridgeError:
+      patch.bridgeError !== undefined ? patch.bridgeError : (rt?.bridgeError ?? null),
+    bridgePid:
+      patch.bridgePid !== undefined ? patch.bridgePid : (rt?.bridgePid ?? null),
+  };
+}
+
 function buildSeedRuntime(seed: RuntimeSeedHints): PerSessionRuntime {
   const cached = seed.cachedLLMs ?? [];
+  const baseBridge = {
+    bridgeStatus: "idle" as BridgeStatus,
+    bridgeError: null,
+    bridgePid: null,
+  };
   if (cached.length === 0) {
-    return { llms: DEMO_LLMS, llmDisplayName: DEMO_LLM_DISPLAY_NAME };
+    return {
+      llms: DEMO_LLMS,
+      llmDisplayName: DEMO_LLM_DISPLAY_NAME,
+      ...baseBridge,
+    };
   }
   const llms =
     seed.persistedIndex !== undefined
@@ -184,7 +300,7 @@ function buildSeedRuntime(seed: RuntimeSeedHints): PerSessionRuntime {
     seed.cachedDisplayName ??
     cached.find((l) => l.isCurrent)?.displayName ??
     DEMO_LLM_DISPLAY_NAME;
-  return { llms, llmDisplayName };
+  return { llms, llmDisplayName, ...baseBridge };
 }
 
 export const useRuntimeStore = create<RuntimeStore>((set, get) => ({
@@ -213,6 +329,9 @@ export const useRuntimeStore = create<RuntimeStore>((set, get) => ({
         // is flagged current, keep the previous displayName to avoid
         // a flash of empty string in the Composer.
         llmDisplayName: current?.displayName ?? existing?.llmDisplayName ?? "",
+        bridgeStatus: existing?.bridgeStatus ?? "idle",
+        bridgeError: existing?.bridgeError ?? null,
+        bridgePid: existing?.bridgePid ?? null,
       };
       // Refresh the cross-session cache too — the freshly arrived
       // list is also a valid snapshot for any future un-seeded
@@ -260,6 +379,7 @@ export const useRuntimeStore = create<RuntimeStore>((set, get) => ({
           isCurrent: i === index,
         }));
         nextById[sid] = {
+          ...rt,
           llms: flipped,
           llmDisplayName: flipped[index].displayName,
         };
@@ -342,6 +462,195 @@ export const useRuntimeStore = create<RuntimeStore>((set, get) => ({
   },
 
   setPetAttachedSession: (sid) => set({ petAttachedSessionId: sid }),
+
+  setBridgeStatus: (sid, status) =>
+    set((state) => ({
+      byId: {
+        ...state.byId,
+        [sid]: _bridgeFieldsUpdate(state.byId[sid], { bridgeStatus: status }),
+      },
+    })),
+
+  spawnBridge: async (args) => {
+    const sessionId = args.sessionId;
+    if (_bridgeClients.has(sessionId)) {
+      console.warn(
+        `[runtime] spawnBridge(${sessionId}) called while a bridge for that session is alive; shutting down first.`,
+      );
+      await useRuntimeStore.getState().shutdownBridge(sessionId);
+    }
+    set((state) => ({
+      byId: {
+        ...state.byId,
+        [sessionId]: _bridgeFieldsUpdate(state.byId[sessionId], {
+          bridgeStatus: "spawning",
+          bridgeError: null,
+        }),
+      },
+    }));
+
+    try {
+      const client = await spawnBridgeProcess(args, {
+        onEvent: (event) => dispatchIPCEvent(event, useAppStore),
+        onStderr: (line) => {
+          console.warn(`[bridge ${sessionId} stderr]`, line);
+          const buf = _stderrTails.get(sessionId) ?? [];
+          buf.push(line);
+          if (buf.length > _STDERR_TAIL_MAX) buf.shift();
+          _stderrTails.set(sessionId, buf);
+        },
+        onClose: (code, signal) => {
+          console.info(`[bridge ${sessionId}] closed`, { code, signal });
+          if (code !== 0 && code !== null) {
+            const tail = _stderrTails.get(sessionId) ?? [];
+            const message = tail.length
+              ? tail.slice(-3).join("\n")
+              : `Bridge exited with code ${code}`;
+            useUiStore.getState().pushToast(
+              makeAppError({
+                category: "bridge",
+                severity: "error",
+                title: "Bridge 进程崩溃",
+                message,
+                hint: null,
+                retryable: false,
+                context: `session ${sessionId}`,
+                traceback: tail.join("\n"),
+              }),
+            );
+          }
+          _stderrTails.delete(sessionId);
+          _bridgeClients.delete(sessionId);
+          _lruRemove(sessionId);
+          // Bridge-side fields go to runtimeStore.
+          useRuntimeStore.setState((state) => ({
+            byId: {
+              ...state.byId,
+              [sessionId]: _bridgeFieldsUpdate(state.byId[sessionId], {
+                bridgeStatus: "closed",
+                bridgePid: null,
+              }),
+            },
+          }));
+          // TRANSITIONAL (M5 messagesStore): conversation-side cleanup
+          // still lives in useAppStore._runtimes[sid]. After M5, this
+          // becomes useMessagesStore.getState().clearStreamingOnClose(sid)
+          // or moves to a Rust-event-driven path. Until then, reach
+          // across stores.
+          useAppStore.setState((state) => {
+            const rt = state._runtimes[sessionId];
+            if (!rt) return {};
+            return {
+              _runtimes: {
+                ...state._runtimes,
+                [sessionId]: {
+                  ...rt,
+                  agentRunning: false,
+                  currentTurnIndex: null,
+                  inFlightContent: "",
+                },
+              },
+            };
+          });
+        },
+        onError: (msg) => {
+          console.error(`[bridge ${sessionId}] error`, msg);
+          useRuntimeStore.setState((state) => ({
+            byId: {
+              ...state.byId,
+              [sessionId]: _bridgeFieldsUpdate(state.byId[sessionId], {
+                bridgeStatus: "error",
+                bridgeError: msg,
+              }),
+            },
+          }));
+          useUiStore.getState().pushToast(
+            makeAppError({
+              category: "bridge",
+              severity: "error",
+              title: "Bridge 启动失败",
+              message: msg,
+              hint: null,
+              retryable: false,
+              context: `session ${sessionId}`,
+              traceback: null,
+            }),
+          );
+        },
+        onMalformedLine: (line) =>
+          console.warn(
+            `[bridge ${sessionId}] malformed stdout line:`,
+            line,
+          ),
+      });
+      _bridgeClients.set(sessionId, client);
+      _lruTouch(sessionId);
+      // Status flips to "connected" only after the bridge sends its
+      // `ready` event (handled in ipc-handlers). Keep "spawning"
+      // here so the UI knows to show a loading affordance.
+      set((state) => ({
+        byId: {
+          ...state.byId,
+          [sessionId]: _bridgeFieldsUpdate(state.byId[sessionId], {
+            bridgePid: client.pid,
+          }),
+        },
+      }));
+      void _enforceLRUCap();
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      _bridgeClients.delete(sessionId);
+      set((state) => ({
+        byId: {
+          ...state.byId,
+          [sessionId]: _bridgeFieldsUpdate(state.byId[sessionId], {
+            bridgeStatus: "error",
+            bridgeError: msg,
+            bridgePid: null,
+          }),
+        },
+      }));
+    }
+  },
+
+  shutdownBridge: async (sessionId) => {
+    const client = _bridgeClients.get(sessionId);
+    if (!client) return;
+    try {
+      await client.shutdown();
+    } finally {
+      _bridgeClients.delete(sessionId);
+      _lruRemove(sessionId);
+      set((state) => ({
+        byId: {
+          ...state.byId,
+          [sessionId]: _bridgeFieldsUpdate(state.byId[sessionId], {
+            bridgeStatus: "closed",
+            bridgePid: null,
+          }),
+        },
+      }));
+    }
+  },
+
+  shutdownAllBridges: async () => {
+    const ids = Array.from(_bridgeClients.keys());
+    await Promise.all(
+      ids.map((id) => useRuntimeStore.getState().shutdownBridge(id)),
+    );
+  },
+
+  sendIPCCommand: async (sessionId, cmd) => {
+    const client = _bridgeClients.get(sessionId);
+    if (!client) {
+      console.warn(
+        `[runtime] sendIPCCommand(${sessionId}) called but no bridge is alive:`,
+        cmd,
+      );
+      return;
+    }
+    await client.send(cmd);
+  },
 
   patchRuntimeInfo: (patch) =>
     set((state) => ({ runtimeInfo: { ...state.runtimeInfo, ...patch } })),

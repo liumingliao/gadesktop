@@ -2,11 +2,6 @@ import { create } from "zustand";
 
 import type { ApprovalConfig } from "@/components/screens/settings/Settings";
 import {
-  type BridgeClient,
-  type BridgeSpawnArgs,
-  spawnBridge as spawnBridgeProcess,
-} from "@/lib/bridge";
-import {
   backfillFtsIfEmpty,
   deleteDemoSessions,
   deleteEmptyNewSessions,
@@ -22,7 +17,6 @@ import {
   persistUserMessage,
   setPref,
 } from "@/lib/db";
-import { dispatchIPCEvent } from "@/lib/ipc-handlers";
 import { deriveSessionStatus } from "@/lib/sessions";
 import {
   DEMO_APPROVAL_CONFIG,
@@ -42,130 +36,9 @@ import type {
   UserTurn,
 } from "@/types/conversation";
 import type { MessageRow } from "@/types/db";
-import type { ApprovalDecision, IPCCommand } from "@/types/ipc";
+import type { ApprovalDecision } from "@/types/ipc";
 import type { Project, Session } from "@/types/session";
 
-/**
- * Multi-session bridge subprocess map (V0.1 #10b N-active model).
- *
- * Each entry is one live GA bridge process keyed by sessionId.
- * Bridge clients aren't serializable (hold function refs to write/
- * kill), so they live outside the Zustand state. Per-session
- * `bridgeStatus` / `bridgeError` / `bridgePid` inside `_runtimes`
- * are the source of truth for "is this session's bridge alive";
- * this map is just the IO handle store.
- *
- * Background-session continuity is the core v0.1 promise: switching
- * the active session does NOT kill other sessions' bridges. App
- * shutdown calls `shutdownAllBridges` to clean up.
- */
-const _bridgeClients = new Map<string, BridgeClient>();
-
-/**
- * Per-session rolling buffer of the last few stderr lines. Used to
- * surface "bridge died with this Python error" toasts on abnormal
- * exit — without this, an ImportError on the bridge side just makes
- * messages silently disappear (the prod-build failure mode we hit
- * 2026-05-15 on first .dmg dogfood). Kept as a module-level Map (not
- * Zustand state) because it's pure ephemeral diagnostic data — no
- * rendering reacts to it. */
-const _stderrTails = new Map<string, string[]>();
-const _STDERR_TAIL_MAX = 8;
-
-export function getBridgeClient(sessionId: string): BridgeClient | null {
-  return _bridgeClients.get(sessionId) ?? null;
-}
-
-/**
- * LRU resource governor for multi-session bridges (Stage 3 Task 2.5).
- *
- * Power users open dozens of sessions in a day. Keeping every session's
- * GA subprocess alive forever is a resource bomb (~150MB RSS + an LLM
- * client per process). 1-active was rejected (background tasks must
- * keep running — see 2026-05-11 devlog). The middle ground: cap the
- * concurrent alive count, suspend the least-recently-used to make
- * room. Re-activating a suspended session re-spawns + replays
- * `load_history` from SQLite, which Stage 3 Task 3 just made viable.
- *
- * `_lruOrder` holds session ids of every alive bridge with the most-
- * recently-activated at the END (push to end on touch). Suspending
- * pulls from the FRONT.
- *
- * Cap is 5 alive bridges — wide enough that the working set
- * ("today's active sessions") stays hot, tight enough that opening
- * a 20th session doesn't grind the machine. User-facing: silent in
- * the happy path; the suspended bridge's session row stays in the
- * sidebar so the user can re-click to bring it back.
- */
-const _lruOrder: string[] = [];
-const LRU_CAP = 5;
-
-/** Mark `sessionId` as most-recently-used. Idempotent + safe to call
- * before `_bridgeClients.set` (touch tracks intent, not actual liveness). */
-function _lruTouch(sessionId: string): void {
-  const idx = _lruOrder.indexOf(sessionId);
-  if (idx !== -1) _lruOrder.splice(idx, 1);
-  _lruOrder.push(sessionId);
-}
-
-/** Remove `sessionId` from the LRU. Called when a bridge actually
- * shuts down (planned suspend OR external crash via onClose). */
-function _lruRemove(sessionId: string): void {
-  const idx = _lruOrder.indexOf(sessionId);
-  if (idx !== -1) _lruOrder.splice(idx, 1);
-}
-
-/**
- * Shut down the oldest non-active, non-running bridges until the LRU
- * is at or under cap. Awaited so the caller can sequence subsequent
- * work after suspended processes are actually gone. Errors are caught
- * per-victim — one failing shutdown shouldn't block the rest.
- *
- * Two classes of session are PROTECTED from eviction:
- *   1. The active session — suspending the one the user is looking
- *      at would be the worst possible UX.
- *   2. Sessions with `agentRunning === true` — N-active's core
- *      promise is "background long tasks keep running". Killing a
- *      mid-turn bridge loses the in-flight LLM call + tool dispatch;
- *      the conversation is left in an indeterminate state (no
- *      turn_end will arrive). Better to temporarily exceed the cap
- *      by 1-2 alive bridges than break that promise — once a
- *      protected session finishes, the next spawn will trim it on
- *      the way out.
- *
- * If every alive bridge falls into one of these categories, the
- * function returns without shutting anything down. The cap will
- * self-correct on the next spawn after one of them completes.
- */
-async function _enforceLRUCap(): Promise<void> {
-  while (_lruOrder.length > LRU_CAP) {
-    const state = useAppStore.getState();
-    const activeId = state.activeSessionId;
-    // Re-evaluate protections every iteration: a previous shutdown
-    // might have changed _runtimes / activeSessionId.
-    const victim = _lruOrder.find(
-      (id) => id !== activeId && !state._runtimes[id]?.agentRunning,
-    );
-    if (!victim) {
-      // Everyone left is either active or mid-turn. Bail and let the
-      // next spawn trigger try again after agents have finished.
-      console.info(
-        `[lru] no eviction candidate (cap=${LRU_CAP}, alive=${_lruOrder.length}); all alive bridges are active or running`,
-      );
-      return;
-    }
-    try {
-      await useAppStore.getState().shutdownBridge(victim);
-    } catch (e) {
-      console.warn(`[lru] suspend ${victim} failed.`, e);
-      // shutdownBridge calls _lruRemove on success only — for failed
-      // shutdowns we still pull from the LRU so the loop can progress;
-      // the leaked bridge will at least disappear on app exit's
-      // shutdownAllBridges.
-      _lruRemove(victim);
-    }
-  }
-}
 
 // LLMOption now lives in runtime.ts (M3a). Re-export here so existing
 // imports (`import { LLMOption } from "@/stores/useAppStore"`) keep
@@ -197,11 +70,10 @@ export interface SessionRuntime {
   currentTurnIndex: number | null;
   inFlightContent: string;
   approvalDecisions: Record<string, ApprovalDecision>;
-  bridgeStatus: BridgeStatus;
-  bridgeError: string | null;
-  bridgePid: number | null;
-  // LLM fields (llms / llmDisplayName) moved to runtime.ts (M3a, 2026-05-19).
-  // The runtimeStore.byId[sid] mirrors what was here.
+  // Bridge lifecycle fields (bridgeStatus / bridgeError / bridgePid)
+  // moved to runtime.ts (M3b, 2026-05-19). LLM fields moved in M3a.
+  // useAppStore._runtimes[sid] now holds only conversation-side state
+  // that M5 messagesStore will eventually claim.
   /**
    * LLM list + currently-selected LLM **for this session's bridge**.
    * N-active multi-session means each bridge has its own currently-
@@ -402,12 +274,11 @@ function emptyRuntime(): SessionRuntime {
     currentTurnIndex: null,
     inFlightContent: "",
     approvalDecisions: {},
-    bridgeStatus: "idle",
-    bridgeError: null,
-    bridgePid: null,
-    // llms / llmDisplayName moved to runtimeStore.byId[sid] in M3a.
-    // useRuntimeStore.getState().ensureRuntime(sid, seedHints) is the
-    // parallel for setActiveSession's lazy-create path.
+    // bridgeStatus / bridgeError / bridgePid moved to runtimeStore in
+    // M3b. llms / llmDisplayName moved in M3a. setActiveSession calls
+    // useRuntimeStore.ensureRuntime to lazy-init the runtime store
+    // entry — emptyRuntime here only carries messagesStore-bound
+    // fields that M5 will own.
     pendingAskUser: null,
     turnIndexOffset: 0,
   };
@@ -573,9 +444,8 @@ interface State {
    * setGAConfig now calls `useRuntimeStore.getState().resetWarmup()`.
    */
   approvalDecisions: Record<string, ApprovalDecision>;
-  bridgeStatus: BridgeStatus;
-  bridgeError: string | null;
-  bridgePid: number | null;
+  // bridgeStatus / bridgeError / bridgePid moved to runtimeStore in M3b.
+  // Read via useRuntimeStore(s => s.byId[activeId]?.bridge*).
 }
 
 interface Actions {
@@ -861,19 +731,9 @@ interface Actions {
    * `useRuntimeStore.getState().setPetAttachedSession(sid)`.
    */
 
-  // Bridge runtime (per-session — sessionId required)
-  setBridgeStatus: (sessionId: string, status: BridgeStatus) => void;
-  /**
-   * Spawn a GA bridge subprocess for `args.sessionId`. If that
-   * session already has an alive bridge, this shuts it down first
-   * (one process per sessionId). Other sessions' bridges are
-   * untouched — that's the multi-session core promise.
-   */
-  spawnBridge: (args: BridgeSpawnArgs) => Promise<void>;
-  shutdownBridge: (sessionId: string) => Promise<void>;
-  /** Shutdown every alive bridge. Used on app exit. */
-  shutdownAllBridges: () => Promise<void>;
-  sendIPCCommand: (sessionId: string, cmd: IPCCommand) => Promise<void>;
+  // Bridge runtime actions (setBridgeStatus / spawnBridge / shutdownBridge
+  // / shutdownAllBridges / sendIPCCommand) all moved to runtimeStore in
+  // M3b. Call via `useRuntimeStore.getState().<action>(...)`.
 
   // Persistence
   hydrateFromDB: () => Promise<void>;
@@ -932,7 +792,12 @@ function applyRuntimeUpdate(
   const sessionIndex = state.sessions.findIndex((s) => s.id === sessionId);
   if (sessionIndex !== -1) {
     const session = state.sessions[sessionIndex];
-    const newStatus = deriveSessionStatus(session, newRt);
+    // bridgeStatus now lives in runtimeStore (M3b) — fetch at call
+    // time to feed into the status derivation. Reading from outside
+    // the slice is fine; this is read-only.
+    const bridgeStatus =
+      useRuntimeStore.getState().byId[sessionId]?.bridgeStatus;
+    const newStatus = deriveSessionStatus(session, newRt, bridgeStatus);
     const newCount = newRt.pendingApprovals.length;
     const newHasAsk = newRt.pendingAskUser !== null;
     // Sidebar's running subline used to sync runtime.currentTurnIndex
@@ -974,9 +839,6 @@ function projectionFrom(rt: SessionRuntime): {
   currentTurnIndex: number | null;
   inFlightContent: string;
   approvalDecisions: Record<string, ApprovalDecision>;
-  bridgeStatus: BridgeStatus;
-  bridgeError: string | null;
-  bridgePid: number | null;
   pendingAskUser: PendingAskUser | null;
 } {
   return {
@@ -986,9 +848,6 @@ function projectionFrom(rt: SessionRuntime): {
     currentTurnIndex: rt.currentTurnIndex,
     inFlightContent: rt.inFlightContent,
     approvalDecisions: rt.approvalDecisions,
-    bridgeStatus: rt.bridgeStatus,
-    bridgeError: rt.bridgeError,
-    bridgePid: rt.bridgePid,
     pendingAskUser: rt.pendingAskUser,
   };
 }
@@ -1366,12 +1225,12 @@ export const useAppStore = create<AppStore>((set, get) => ({
     // by simply re-clicking the session. `closed` is also how the
     // LRU governor signals "suspended" — re-activation regenerates
     // the bridge and the IPC `ready` handler replays SQLite history.
-    const rtAfter = get()._runtimes[id];
+    const runtimeForActivate = useRuntimeStore.getState().byId[id];
+    const bridgeStatus = runtimeForActivate?.bridgeStatus ?? "idle";
     const needsSpawn =
-      !rtAfter ||
-      rtAfter.bridgeStatus === "idle" ||
-      rtAfter.bridgeStatus === "closed" ||
-      rtAfter.bridgeStatus === "error";
+      bridgeStatus === "idle" ||
+      bridgeStatus === "closed" ||
+      bridgeStatus === "error";
     if (needsSpawn) {
       // Project = pure grouping. We deliberately do NOT inject the
       // project's rootPath as the bridge cwd here — doing so would
@@ -1407,17 +1266,15 @@ export const useAppStore = create<AppStore>((set, get) => ({
         !consumePending && !isFreshSession
           ? session?.selectedLlmIndex
           : undefined;
-      await get().spawnBridge({
+      await useRuntimeStore.getState().spawnBridge({
         ...get().gaConfig,
         sessionId: id,
         cwd: undefined,
         llmIndex: consumePending ? pendingLLMIndex : restoredLlmIndex,
       });
-    } else {
-      // Already alive — mark as most-recently-used so the LRU
-      // governor protects it on the next overflow.
-      _lruTouch(id);
     }
+    // Already alive — runtimeStore.spawnBridge internally LRU-touches
+    // on each call, so the alive-bridge branch is now a no-op here.
   },
 
   archiveSession: (sessionId) => {
@@ -1705,15 +1562,18 @@ export const useAppStore = create<AppStore>((set, get) => ({
     // single-row path does. Done sequentially with awaits so we
     // don't fire N parallel shutdowns racing the same process tree.
     for (const id of sessionIds) {
-      if (getBridgeClient(id)) {
-        try {
-          await useAppStore.getState().shutdownBridge(id);
-        } catch (e) {
-          console.warn(
-            `[store] deleteSessionsPermanentlyBulk shutdownBridge failed for ${id}.`,
-            e,
-          );
-        }
+      try {
+        // shutdownBridge no-ops when no client is alive — the previous
+        // `getBridgeClient(id)` precondition check was just an
+        // optimisation. After M3b moved bridge state into runtimeStore,
+        // querying liveness from outside the slice is no longer
+        // exposed; calling the action unconditionally is safe.
+        await useRuntimeStore.getState().shutdownBridge(id);
+      } catch (e) {
+        console.warn(
+          `[store] deleteSessionsPermanentlyBulk shutdownBridge failed for ${id}.`,
+          e,
+        );
       }
     }
     const idSet = new Set(sessionIds);
@@ -1745,15 +1605,13 @@ export const useAppStore = create<AppStore>((set, get) => ({
     // Archived sessions shouldn't have a live bridge (archiveSession
     // doesn't kill one, but LRU 5 typically reaps them); covering
     // the edge so we don't leak a process pointing at a deleted id.
-    if (getBridgeClient(sessionId)) {
-      try {
-        await useAppStore.getState().shutdownBridge(sessionId);
-      } catch (e) {
-        console.warn(
-          "[store] deleteSessionPermanently shutdownBridge failed.",
-          e,
-        );
-      }
+    try {
+      await useRuntimeStore.getState().shutdownBridge(sessionId);
+    } catch (e) {
+      console.warn(
+        "[store] deleteSessionPermanently shutdownBridge failed.",
+        e,
+      );
     }
     // Remove from in-memory state first so the UI updates even if
     // SQLite is unavailable (Vite-only dev). _runtimes entry is
@@ -1861,9 +1719,14 @@ export const useAppStore = create<AppStore>((set, get) => ({
     }
     // YOLO is global — notify every alive bridge. Sessions spawned
     // later sync via the on-`ready` handler in ipc-handlers.ts.
-    for (const [sid, client] of _bridgeClients) {
+    // Iterate runtimeStore entries that look connected; sendIPCCommand
+    // internally no-ops if the slot's bridge isn't actually alive.
+    const runtimeSlots = useRuntimeStore.getState().byId;
+    for (const sid of Object.keys(runtimeSlots)) {
       try {
-        await client.send({ kind: "set_yolo_mode", enabled });
+        await useRuntimeStore
+          .getState()
+          .sendIPCCommand(sid, { kind: "set_yolo_mode", enabled });
       } catch (e) {
         console.warn(`[store] setYoloMode: bridge ${sid} notify failed.`, e);
       }
@@ -2249,196 +2112,6 @@ export const useAppStore = create<AppStore>((set, get) => ({
 
   // setPetAttachedSession moved to runtime.ts (M3a, 2026-05-19).
 
-  // ---- Bridge runtime ----
-  setBridgeStatus: (sessionId, status) =>
-    set((state) =>
-      applyRuntimeUpdate(state, sessionId, (rt) => ({
-        ...rt,
-        bridgeStatus: status,
-      })),
-    ),
-
-  spawnBridge: async (args) => {
-    const sessionId = args.sessionId;
-    // One process per sessionId. If that session already has a live
-    // bridge, shut it down first. Other sessions' bridges are NOT
-    // touched — multi-session is the v0.1 core promise.
-    if (_bridgeClients.has(sessionId)) {
-      console.warn(
-        `[store] spawnBridge(${sessionId}) called while a bridge for that session is alive; shutting down first.`,
-      );
-      await useAppStore.getState().shutdownBridge(sessionId);
-    }
-
-    set((state) =>
-      applyRuntimeUpdate(state, sessionId, (rt) => ({
-        ...rt,
-        bridgeStatus: "spawning",
-        bridgeError: null,
-      })),
-    );
-
-    try {
-      const client = await spawnBridgeProcess(args, {
-        onEvent: (event) => dispatchIPCEvent(event, useAppStore),
-        onStderr: (line) => {
-          console.warn(`[bridge ${sessionId} stderr]`, line);
-          // Keep a rolling tail so onClose can show what went wrong.
-          const buf = _stderrTails.get(sessionId) ?? [];
-          buf.push(line);
-          if (buf.length > _STDERR_TAIL_MAX) buf.shift();
-          _stderrTails.set(sessionId, buf);
-        },
-        onClose: (code, signal) => {
-          console.info(`[bridge ${sessionId}] closed`, { code, signal });
-          // Abnormal exit → surface a toast with the last stderr lines
-          // so the user sees the real failure (ImportError, syntax
-          // error in mykey.py, etc.) instead of just "nothing
-          // happened". `code === 0` means graceful shutdown; null code
-          // with no signal means we shut it down ourselves via
-          // child.kill() — also not user-facing. Anything else is a
-          // real crash worth surfacing.
-          if (code !== 0 && code !== null) {
-            const tail = _stderrTails.get(sessionId) ?? [];
-            const message = tail.length
-              ? tail.slice(-3).join("\n")
-              : `Bridge exited with code ${code}`;
-            useUiStore.getState().pushToast(
-              makeAppError({
-                category: "bridge",
-                severity: "error",
-                title: "Bridge 进程崩溃",
-                message,
-                hint: null,
-                retryable: false,
-                context: `session ${sessionId}`,
-                traceback: tail.join("\n"),
-              }),
-            );
-          }
-          _stderrTails.delete(sessionId);
-          _bridgeClients.delete(sessionId);
-          // Drop from LRU regardless of why it closed — planned
-          // shutdownBridge already removed it; crashes / external
-          // kills get cleaned up here. Defensive: indexOf check
-          // makes the second remove a no-op.
-          _lruRemove(sessionId);
-          useAppStore.setState((state) =>
-            applyRuntimeUpdate(state, sessionId, (rt) => ({
-              ...rt,
-              bridgeStatus: "closed",
-              bridgePid: null,
-              // Safety net for bridge crash / kill / LRU suspend:
-              // turn_end no longer clears agentRunning (it's per-step,
-              // not terminal), so without this `onClose` cleanup a
-              // bridge dying mid-run would leave the sidebar stuck on
-              // "正在工作". `run_complete` / `error` cover the graceful
-              // exits; onClose catches everything else.
-              agentRunning: false,
-              currentTurnIndex: null,
-              inFlightContent: "",
-            })),
-          );
-        },
-        onError: (msg) => {
-          console.error(`[bridge ${sessionId}] error`, msg);
-          useAppStore.setState((state) =>
-            applyRuntimeUpdate(state, sessionId, (rt) => ({
-              ...rt,
-              bridgeStatus: "error",
-              bridgeError: msg,
-            })),
-          );
-          // Spawn-time failures (binary missing, capability rejected,
-          // permission denied) — also worth a toast so the user sees
-          // something concrete instead of "the chat is just frozen".
-          useUiStore.getState().pushToast(
-            makeAppError({
-              category: "bridge",
-              severity: "error",
-              title: "Bridge 启动失败",
-              message: msg,
-              hint: null,
-              retryable: false,
-              context: `session ${sessionId}`,
-              traceback: null,
-            }),
-          );
-        },
-        onMalformedLine: (line) =>
-          console.warn(
-            `[bridge ${sessionId}] malformed stdout line:`,
-            line,
-          ),
-      });
-      _bridgeClients.set(sessionId, client);
-      _lruTouch(sessionId);
-      // Status flips to "connected" only after the bridge sends its
-      // `ready` event (handled in ipc-handlers). Keep "spawning"
-      // here so the UI knows to show a loading affordance.
-      set((state) =>
-        applyRuntimeUpdate(state, sessionId, (rt) => ({
-          ...rt,
-          bridgePid: client.pid,
-        })),
-      );
-      // Enforce LRU cap — suspend the oldest non-active bridges so
-      // resource use stays bounded even after the user opens 20+
-      // sessions. The suspended session's row keeps showing in the
-      // sidebar; clicking it later re-spawns + replays history.
-      // Fire-and-forget so spawn returns to the caller promptly;
-      // overflow shutdown happens in the background.
-      void _enforceLRUCap();
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      _bridgeClients.delete(sessionId);
-      set((state) =>
-        applyRuntimeUpdate(state, sessionId, (rt) => ({
-          ...rt,
-          bridgeStatus: "error",
-          bridgeError: msg,
-          bridgePid: null,
-        })),
-      );
-    }
-  },
-
-  shutdownBridge: async (sessionId) => {
-    const client = _bridgeClients.get(sessionId);
-    if (!client) return;
-    try {
-      await client.shutdown();
-    } finally {
-      _bridgeClients.delete(sessionId);
-      _lruRemove(sessionId);
-      set((state) =>
-        applyRuntimeUpdate(state, sessionId, (rt) => ({
-          ...rt,
-          bridgeStatus: "closed",
-          bridgePid: null,
-        })),
-      );
-    }
-  },
-
-  shutdownAllBridges: async () => {
-    const ids = Array.from(_bridgeClients.keys());
-    await Promise.all(
-      ids.map((id) => useAppStore.getState().shutdownBridge(id)),
-    );
-  },
-
-  sendIPCCommand: async (sessionId, cmd) => {
-    const client = _bridgeClients.get(sessionId);
-    if (!client) {
-      console.warn(
-        `[store] sendIPCCommand(${sessionId}) called but no bridge is alive:`,
-        cmd,
-      );
-      return;
-    }
-    await client.send(cmd);
-  },
 
   // ---- Persistence ----
   //
