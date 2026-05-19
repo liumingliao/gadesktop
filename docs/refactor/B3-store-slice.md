@@ -1,10 +1,10 @@
 # B3 · useAppStore 拆 slice + 改订阅 Rust event
 
 ```
-Cursor:   T2.1  (M2 uiStore 抽离 — 进入实施阶段)
-Status:   🟡 M1 ✅ COMPLETE · 3 artifact (mapping + ADR + Rust emit catalogue) + M1 devlog · 0 代码改动 · M2 实施前不需等额外 gate
+Cursor:   T2.6  (M2 code ✅ + typecheck/lint ✅ · 待 JC dogfood 验证后 ship)
+Status:   🟢 M2 code 落地 · uiStore 抽离完成 · net -61 行 · M2 启动门 override (详 N4)
 Started:  2026-05-19
-Last touch: 2026-05-19 — M1 全 10 sub-task done, ~3.5h total (1.5× under 4-6h G1 budget). 详 N2 / N3
+Last touch: 2026-05-19 — M2 T2.1-T2.5 + T2.7 done. 5 字段 + 8 action 迁 ui.ts；2 callers (App.tsx + ipc-handlers.ts) swap 完；T2.3 conversationWidth SKIP per ADR AD-04。详 N4
 Predecessor: B2 完成 (M1-M7 + tag b2-complete) + dogfood 1 周稳定期
 Successor:   B4 (CLI feature-complete + background mode + adapter artifact)
 Duration:    3-4 周估计（D31-D50+，按 PRD 节奏），但 stub 已警告"3-4 周可能拖到 5-6 周"
@@ -96,15 +96,15 @@ Duration:    3-4 周估计（D31-D50+，按 PRD 节奏），但 stub 已警告"3
 
 ### Sub-tasks
 
-- [ ] **T2.1** 新建 `gui/src/stores/ui.ts`（命名风格：`<domain>.ts`，不带 `Store` suffix；hook 是 `useUiStore`）
-- [ ] **T2.2** 把 screen / paletteOpen / settingsOpen / toggle 系列 actions 迁过来。**保留 `useAppStore` 老 hook 暂时 alias** 到 useUiStore — 调用方零改动，慢慢迁 import path
-- [ ] **T2.3** 把 conversationWidth + setConversationWidth 迁过来（prefs 但只读路径多，留 ui 暂行；M6 prefs slice 时再评估搬不搬）
-- [ ] **T2.4** 把 toasts / pushToast / dismissToast 迁过来
-- [ ] **T2.5** 调用方 import 切换：grep `useAppStore` 所有用到 ui 字段的 site，改 `useUiStore`。`__legacy/useAppStore.ts` 同步删除已迁字段（B3-I3 不允许双轨）
-- [ ] **T2.6** Dogfood：开 Galley 跑常用 UI 路径 — palette open/close / settings open / toast 弹 / sidebar 三栏切宽窄 / Onboarding 流程 — **全部行为不变**
-- [ ] **T2.7** TS typecheck + lint 全过
-- [ ] **T2.8** M2 commit：`Refactor: B3 M2 — extract uiStore (display state)`
-- [ ] **T2.9** **Dogfood 1 天**（B3-I1）— JC daily driver 跑 24h+，无 regression 才进 M3
+- [x] **T2.1** 新建 [`gui/src/stores/ui.ts`](../../gui/src/stores/ui.ts)（73 行，5 字段 + 8 action）。Screen 类型迁过来并 re-export
+- [x] **T2.2** 把 screen / paletteOpen / settingsOpen / toggle 系列 actions + setPendingPetMigration（+ pendingPetMigrationTo 字段）迁过来。**直接迁，不留 alias** — 同 commit 内 swap 所有 callers（per B3-I3 "no double-track"，alias 在单 commit migration 下多余）
+- [x] **T2.3 SKIP** — conversationWidth 留在 useAppStore 直到 M6 prefsStore 抽出（per [ADR AD-04 sub-note](./b3-slice-adr.md#ad-04--conversationwidth-归-prefsstore不是-uistore)）。**playbook 上一版 T2.3 跟 ADR 矛盾，本 sub-task skip 是 ADR 优先**
+- [x] **T2.4** 把 toasts / pushToast / dismissToast 迁过来。useAppStore 内 3 个 internal `get().pushToast(...)` + 2 个 `useAppStore.getState().pushToast(...)` 全 swap 到 `useUiStore.getState().pushToast(...)`。ipc-handlers.ts 同样 swap
+- [x] **T2.5** Call site swap：[App.tsx](../../gui/src/App.tsx) 11 个 hook (screen / setScreen / paletteOpen / setPaletteOpen / togglePalette / settingsOpen / setSettingsOpen / setPendingPetMigration / toasts / pushToast / dismissToast) + 2 个 inline `import("...").Screen` type ref 改走 ui.ts。[ipc-handlers.ts](../../gui/src/lib/ipc-handlers.ts) 4 个 `s.pushToast` + 2 个 `s.setPendingPetMigration` + 1 个 `s.pendingPetMigrationTo` 字段读 → 全 `useUiStore.getState()...`
+- [ ] **T2.6** Dogfood — JC 待跑 (M2 启动门已 override，本 sub-task 还在，但属 post-commit risk window)
+- [x] **T2.7** TS typecheck + ESLint 0 warning（cd gui && pnpm typecheck + pnpm lint）
+- [ ] **T2.8** M2 commit pending（本 N4 落地后一并 ship）
+- [ ] **T2.9** **Dogfood 1 天**（B3-I1）— JC daily driver 跑 24h+（M2 启动门 override = 这条也 implicitly relaxed，但 commit 后仍要 JC dogfood 确认行为不变）
 
 ---
 
@@ -244,6 +244,7 @@ Duration:    3-4 周估计（D31-D50+，按 PRD 节奏），但 stub 已警告"3
 - **N1 (2026-05-19, pre-T1.1)** — Prereq relaxation: 把 "B2 完成后 dogfood 1 周稳定期" 单层 gate 拆成「M1 启动门」（轻，scenarios 列表先写）+「M2 启动门」（重，scenarios JC 真跑过签字 + perf baseline 测好）。理由 + rejected alternatives 详 [devlog](../devlog/2026-05-19-b3-prereq-relaxation.md)。**触发**：B2 ship 当天 JC 想推 B3，发现单层 gate 跟 B2 完成 devlog 自己的话（"the dogfood period is an empirical confidence-building step, not a gating contract"）+ CLAUDE.md「事件驱动，非日历驱动」原则双重冲突，且 T1.1（pure paperwork）跟 M2（动 frontend 代码）风险差 100×，同 gate 拦不合理
 - **N2 (2026-05-19, T1.1 done)** — 静态分析跑下来 grep 索引比预期省力：193 line 经 manual review 到 89 distinct items（32 字段 + 57 action），4-6h G1 预算实际花 1.5h（含读 SessionRuntime jsdoc + 跑 callers grep + 写 mapping doc）。**预算太保守**——遗产是 SessionRuntime 已经把所有 per-session 字段集中到一个 interface，grep 跟 interface 互相印证非常省。**新发现**：(a) `getBridgeClient` 0 个外部 callers — T1.4 删 module-level 3 Map 完全干净；(b) **active-session projection 是 B3 最大的 mechanical work** —— 12 个 top-level mirror 字段对应 96 个 useAppStore call site，M3-M5 每个 slice 实施时都要 sweep 一遍组件订阅；(c) `agentRunning` 边界模糊 — 是 messages（conversation 状态）还是 runtime（bridge 状态）？mapping doc 暂分 messages，O7 标注 M3/M5 dogfood 时复核；(d) sessionsStore / messagesStore 估计 550 / 600 行，**接近** B3-I5 600 行硬上限，M5 实施时 G11 子文件拆分预案要执行。**Open**: T1.2 ADR 实施 verbatim 跟 mapping doc 字段表对齐；T1.3 `activeProjectFilter` / yoloIntroSeen / conversationWidth 归属判断需要 explicit 写下来（mapping doc 已给暂行决定但 ADR 是契约）
 - **N3 (2026-05-19, M1 COMPLETE)** — T1.2 → T1.10 串推：[`b3-slice-adr.md`](./b3-slice-adr.md) 落 11 个 AD（边界 / dead-state / DAG / RESOLVED 复述）+ [`b3-rust-emit-catalogue.md`](./b3-rust-emit-catalogue.md) 落 5 个新 emit event spec（sessions-updated / messages-appended / projects-updated / prefs-updated / runtime-updated）+ [M1 完成 devlog](../devlog/2026-05-19-b3-m1-design-complete.md) 6 段格式总结。**新发现**：(a) Rust 端 emit 5 个 domain event 而非 raw runner-event 给 GUI —— GUI 不重复解释 IpcEvent，IPC 解释逻辑在 Rust spawn_emit_task 中央化（[ADR AD-09](./b3-slice-adr.md#ad-09--slice-dependency-dagt18) 钉死）。(b) [`runtime-updated` 新 event](./b3-rust-emit-catalogue.md#5--runtime-updated) 是关键设计 call —— 不放在 M3 T3.3 的 stub list 里曾经只写「spawn_emit_task 内 emit」没钉 schema，本次 catalogue 把 payload shape 完整 spec。(c) M1 + prereq relaxation 同 session 跑完 = 单 session 5h 总时长（含 prereq 2h + M1 3h），G1 budget 4-6h 是 M1 alone，超估约 1.5×。**Open**: M2 启动门要求「scenarios JC 真跑过 + perf baseline 测好」——本 session 不动 frontend 代码，M2 启动前 JC 单独跑 dogfood + 测 baseline 即可，本 session 结束
+- **N4 (2026-05-19, M2 启动门 override)** — JC explicit 选择「破 M2 启动门」连推 M2 实施，不等 dogfood scenarios 签字 + perf baseline。**记录此决策为 tactical override 而非 rule change** —— 启动门规则本体不变（[Prerequisites § M2 启动门](#prerequisites--必须先完成) 仍 codified），但本 session 当作 single-event override 推过。**风险吸收**：M2 是 5 slice 最简单的（pure display state，no transport，[B3-I4](#phase-invariants--b3-特有的硬规则) 不动 Rust 端），代码改动 net -61 行（useAppStore -79 / ui.ts +73 / App.tsx + ipc-handlers 微调），typecheck + lint 全 clean。若 JC 用 dev mode dogfood 发现 B2 / B3 regression 混在一起难定位 = override 的代价显形，撤回 commit + 重做。如果没发现 = M2 启动门未来对类似 paperwork-adjacent milestones 可以 case-by-case override。**不**推广这条 override 到 M3-M5 — 那几个 milestone 改动 authoritative state + 订阅化，比 M2 风险高一个量级，gate 仍 enforce
 
 ---
 

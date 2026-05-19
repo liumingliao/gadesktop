@@ -32,7 +32,8 @@ import {
   DEMO_RUNTIME_INFO,
   DEMO_SESSIONS,
 } from "@/stores/demo";
-import { type AppError, makeAppError } from "@/types/app-error";
+import { useUiStore } from "@/stores/ui";
+import { makeAppError } from "@/types/app-error";
 import type {
   AgentTurn,
   ConversationToolEvent,
@@ -168,8 +169,6 @@ async function _enforceLRUCap(): Promise<void> {
     }
   }
 }
-
-export type Screen = "onboarding" | "empty" | "main";
 
 export interface LLMOption {
   index: number;
@@ -412,11 +411,6 @@ function emptyRuntime(): SessionRuntime {
 }
 
 interface State {
-  // ---- UI ----
-  screen: Screen;
-  paletteOpen: boolean;
-  settingsOpen: boolean;
-
   // ---- Sessions ----
   sessions: Session[];
   activeSessionId: string | undefined;
@@ -528,15 +522,6 @@ interface State {
    */
   petAttachedSessionId: string | null;
   /**
-   * Implicit-migration target: when the user clicks "桌面宠物" in a
-   * session that doesn't currently hold the pet, we send detach_pet
-   * to the holder and stash the target here. The pet_detached IPC
-   * handler relays an attach_pet to this target once the old pet's
-   * port is released. Cleared in both pet_attached and pet_detached
-   * handlers so a stale value can't trigger spurious attaches.
-   */
-  pendingPetMigrationTo: string | null;
-  /**
    * Conversation reading column width. Notion-style two-mode toggle
    * (DESIGN.md tbd):
    *   - "compact": 760px max-width — typographic sweet spot
@@ -558,9 +543,6 @@ interface State {
    * to prefs `conversation_width`.
    */
   conversationWidth: "compact" | "wide";
-
-  // ---- Errors (global) ----
-  toasts: AppError[];
 
   // ---- Per-session runtimes (internal, keyed by sessionId) ----
   /**
@@ -626,13 +608,6 @@ interface State {
 }
 
 interface Actions {
-  // UI
-  setScreen: (s: Screen) => void;
-  setPaletteOpen: (o: boolean) => void;
-  togglePalette: () => void;
-  setSettingsOpen: (o: boolean) => void;
-  toggleSettings: () => void;
-
   // Sessions
   setActiveSession: (id: string | undefined) => void;
   /**
@@ -852,10 +827,6 @@ interface Actions {
    */
   warmupLLMList: () => Promise<void>;
 
-  // Errors
-  pushToast: (e: AppError) => void;
-  dismissToast: (id: string) => void;
-
   /**
    * Replace this session's LLM list (and currently-selected
    * displayName, derived from `llms.find(l => l.isCurrent)`). Called
@@ -927,12 +898,6 @@ interface Actions {
    * bridge's response flip this flag.
    */
   setPetAttachedSession: (sessionId: string | null) => void;
-  /**
-   * Stage the target session for an implicit pet migration. Set by
-   * the title-menu click in a non-holder session; consumed by the
-   * pet_detached IPC handler to fire the follow-up attach_pet.
-   */
-  setPendingPetMigration: (sessionId: string | null) => void;
 
   // Bridge runtime (per-session — sessionId required)
   setBridgeStatus: (sessionId: string, status: BridgeStatus) => void;
@@ -1217,10 +1182,6 @@ function buildMockSessions(): Session[] {
 
 export const useAppStore = create<AppStore>((set, get) => ({
   // ---- Initial state (demo fixtures) ----
-  screen: "empty",
-  paletteOpen: false,
-  settingsOpen: false,
-
   sessions: DEMO_SESSIONS,
   activeSessionId: undefined,
   projects: [],
@@ -1239,9 +1200,6 @@ export const useAppStore = create<AppStore>((set, get) => ({
   yoloIntroSeen: true,
   conversationWidth: "compact",
   petAttachedSessionId: null,
-  pendingPetMigrationTo: null,
-
-  toasts: [],
 
   _runtimes: {},
 
@@ -1254,13 +1212,6 @@ export const useAppStore = create<AppStore>((set, get) => ({
   // Top-level projection starts as the empty runtime (no active
   // session yet). setActiveSession refreshes these.
   ...projectionFrom(emptyRuntime()),
-
-  // ---- UI actions ----
-  setScreen: (s) => set({ screen: s }),
-  setPaletteOpen: (o) => set({ paletteOpen: o }),
-  togglePalette: () => set({ paletteOpen: !get().paletteOpen }),
-  setSettingsOpen: (o) => set({ settingsOpen: o }),
-  toggleSettings: () => set({ settingsOpen: !get().settingsOpen }),
 
   // ---- Sessions actions ----
   setActiveSession: (id) => {
@@ -1527,7 +1478,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
       // sidebar, which on its own reads as "did anything happen?".
       // A short info toast confirms the action — eventually V0.2
       // upgrades this to include an Undo affordance.
-      get().pushToast(
+      useUiStore.getState().pushToast(
         makeAppError({
           category: "business",
           severity: "info",
@@ -1738,7 +1689,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
       ),
     );
     if (updatedRows.length > 0) {
-      get().pushToast(
+      useUiStore.getState().pushToast(
         makeAppError({
           category: "business",
           severity: "info",
@@ -2017,7 +1968,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
       ([, v]) => v !== undefined && v !== "",
     );
     if (changedField) {
-      get().pushToast(
+      useUiStore.getState().pushToast(
         makeAppError({
           category: "business",
           severity: "info",
@@ -2036,17 +1987,6 @@ export const useAppStore = create<AppStore>((set, get) => ({
       void get().warmupLLMList();
     }
   },
-
-  // ---- Errors ----
-  pushToast: (e) =>
-    set((state) => ({
-      toasts: [e, ...state.toasts.filter((t) => t.id !== e.id)],
-    })),
-
-  dismissToast: (id) =>
-    set((state) => ({
-      toasts: state.toasts.filter((t) => t.id !== id),
-    })),
 
   // ---- LLMs ----
   replaceLLMs: (sessionId, llms) => {
@@ -2408,9 +2348,6 @@ export const useAppStore = create<AppStore>((set, get) => ({
   setPetAttachedSession: (sessionId) =>
     set({ petAttachedSessionId: sessionId }),
 
-  setPendingPetMigration: (sessionId) =>
-    set({ pendingPetMigrationTo: sessionId }),
-
   // ---- Bridge runtime ----
   setBridgeStatus: (sessionId, status) =>
     set((state) =>
@@ -2465,7 +2402,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
             const message = tail.length
               ? tail.slice(-3).join("\n")
               : `Bridge exited with code ${code}`;
-            useAppStore.getState().pushToast(
+            useUiStore.getState().pushToast(
               makeAppError({
                 category: "bridge",
                 severity: "error",
@@ -2514,7 +2451,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
           // Spawn-time failures (binary missing, capability rejected,
           // permission denied) — also worth a toast so the user sees
           // something concrete instead of "the chat is just frozen".
-          useAppStore.getState().pushToast(
+          useUiStore.getState().pushToast(
             makeAppError({
               category: "bridge",
               severity: "error",
@@ -2815,7 +2752,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
       // this machine — dogfood case) or fail silently because the
       // packaged-build `python3` PATH has no anthropic. Either way the
       // user hasn't picked their real config yet, so warmup is noise.
-      set({ screen: "onboarding" });
+      useUiStore.getState().setScreen("onboarding");
       return;
     }
 

@@ -26,7 +26,8 @@ import {
   buildDemoTurns,
   makeDemoToast,
 } from "@/stores/demo";
-import { useAppStore, type Screen } from "@/stores/useAppStore";
+import { useUiStore, type Screen } from "@/stores/ui";
+import { useAppStore } from "@/stores/useAppStore";
 
 /**
  * V0.1 Stage 2 #8 — App entry.
@@ -43,15 +44,15 @@ import { useAppStore, type Screen } from "@/stores/useAppStore";
  * review of the Error Card. Both vanish in production builds.
  */
 function App() {
-  const screen = useAppStore((s) => s.screen);
-  const setScreen = useAppStore((s) => s.setScreen);
+  const screen = useUiStore((s) => s.screen);
+  const setScreen = useUiStore((s) => s.setScreen);
 
-  const paletteOpen = useAppStore((s) => s.paletteOpen);
-  const setPaletteOpen = useAppStore((s) => s.setPaletteOpen);
-  const togglePalette = useAppStore((s) => s.togglePalette);
+  const paletteOpen = useUiStore((s) => s.paletteOpen);
+  const setPaletteOpen = useUiStore((s) => s.setPaletteOpen);
+  const togglePalette = useUiStore((s) => s.togglePalette);
 
-  const settingsOpen = useAppStore((s) => s.settingsOpen);
-  const setSettingsOpen = useAppStore((s) => s.setSettingsOpen);
+  const settingsOpen = useUiStore((s) => s.settingsOpen);
+  const setSettingsOpen = useUiStore((s) => s.setSettingsOpen);
 
   // Sidebar live-status comes from `sessions` directly: the store's
   // `applyRuntimeUpdate` syncs sidebar-visible fields (status,
@@ -107,11 +108,11 @@ function App() {
   const conversationWidth = useAppStore((s) => s.conversationWidth);
   const setConversationWidth = useAppStore((s) => s.setConversationWidth);
   const petAttachedSessionId = useAppStore((s) => s.petAttachedSessionId);
-  const setPendingPetMigration = useAppStore((s) => s.setPendingPetMigration);
+  const setPendingPetMigration = useUiStore((s) => s.setPendingPetMigration);
 
-  const toasts = useAppStore((s) => s.toasts);
-  const pushToast = useAppStore((s) => s.pushToast);
-  const dismissToast = useAppStore((s) => s.dismissToast);
+  const toasts = useUiStore((s) => s.toasts);
+  const pushToast = useUiStore((s) => s.pushToast);
+  const dismissToast = useUiStore((s) => s.dismissToast);
 
   const bridgeStatus = useAppStore((s) => s.bridgeStatus);
   const shutdownAllBridges = useAppStore((s) => s.shutdownAllBridges);
@@ -334,7 +335,7 @@ function App() {
   //     "with Settings open").
   const [healthCheckRevisit, setHealthCheckRevisit] = useState(false);
   const [revisitReturnScreen, setRevisitReturnScreen] =
-    useState<import("@/stores/useAppStore").Screen>("empty");
+    useState<import("@/stores/ui").Screen>("empty");
 
   const [deletingProjectId, setDeletingProjectId] = useState<string | null>(
     null,
@@ -906,7 +907,7 @@ async function submitOnEmpty(
     sessionId: string,
     cmd: { kind: "user_message"; text: string; images?: string[] },
   ) => Promise<void>,
-  setScreen: (s: import("@/stores/useAppStore").Screen) => void,
+  setScreen: (s: import("@/stores/ui").Screen) => void,
   inheritProjectId?: string,
 ): Promise<void> {
   let id = existingId;

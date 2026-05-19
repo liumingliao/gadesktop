@@ -12,6 +12,7 @@ import type {
   ToolResult as IPCToolResult,
 } from "@/types/ipc";
 
+import { useUiStore } from "@/stores/ui";
 import type { useAppStore } from "@/stores/useAppStore";
 
 /**
@@ -133,7 +134,7 @@ export function dispatchIPCEvent(
 
     case "error": {
       console.warn("[ipc] error", event);
-      s.pushToast(fromIPCError(event));
+      useUiStore.getState().pushToast(fromIPCError(event));
       // Bridge errors usually mean turn_end won't arrive — clear the
       // running flag so the thinking placeholder + Stop-mode Composer
       // don't get stuck on. Categories like `quota_exceeded` /
@@ -274,7 +275,7 @@ export function dispatchIPCEvent(
         sessionId: event.sessionId,
         blocksAdded: event.blocksAdded,
       });
-      s.pushToast(
+      useUiStore.getState().pushToast(
         makeAppError({
           category: "business",
           severity: "info",
@@ -297,8 +298,8 @@ export function dispatchIPCEvent(
       s.setPetAttachedSession(event.sessionId);
       // Clear any stale migration target so a future detach can't
       // re-trigger an attach on a session the user no longer wants.
-      s.setPendingPetMigration(null);
-      s.pushToast(
+      useUiStore.getState().setPendingPetMigration(null);
+      useUiStore.getState().pushToast(
         makeAppError({
           category: "business",
           severity: "info",
@@ -328,16 +329,16 @@ export function dispatchIPCEvent(
       // released, hook removed) we fire the follow-up attach. Skip
       // the "已关闭" toast in this case — the about-to-arrive
       // pet_attached toast tells the right story for migrations.
-      const pendingTarget = s.pendingPetMigrationTo;
+      const pendingTarget = useUiStore.getState().pendingPetMigrationTo;
       if (pendingTarget) {
-        s.setPendingPetMigration(null);
+        useUiStore.getState().setPendingPetMigration(null);
         void s.sendIPCCommand(pendingTarget, {
           kind: "attach_pet",
           port: 41983,
         });
         return;
       }
-      s.pushToast(
+      useUiStore.getState().pushToast(
         makeAppError({
           category: "business",
           severity: "info",
