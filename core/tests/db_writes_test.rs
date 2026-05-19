@@ -453,6 +453,54 @@ async fn assign_session_to_project_not_found_session() {
     assert!(matches!(err, GalleyError::NotFound { .. }));
 }
 
+// ---------------- set_session_llm ----------------
+
+#[tokio::test]
+async fn set_session_llm_persists_choice() {
+    let pool = fresh_pool().await;
+    seed_session_idle(&pool, "s1").await;
+    let galley = SqliteGalley::from_pool(pool);
+    let brief = galley
+        .set_session_llm(sid("s1"), Some(3), Some("Claude Opus 4.7".into()))
+        .await
+        .expect("set llm");
+    assert_eq!(brief.selected_llm_index, Some(3));
+    assert_eq!(
+        brief.selected_llm_display_name.as_deref(),
+        Some("Claude Opus 4.7")
+    );
+}
+
+#[tokio::test]
+async fn set_session_llm_clear_with_none() {
+    let pool = fresh_pool().await;
+    seed_session_idle(&pool, "s1").await;
+    sqlx::query(
+        "UPDATE sessions SET llm_index = 2, llm_display_name = 'old' WHERE id = 's1'",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    let galley = SqliteGalley::from_pool(pool);
+    let brief = galley
+        .set_session_llm(sid("s1"), None, None)
+        .await
+        .expect("clear");
+    assert!(brief.selected_llm_index.is_none());
+    assert!(brief.selected_llm_display_name.is_none());
+}
+
+#[tokio::test]
+async fn set_session_llm_not_found() {
+    let pool = fresh_pool().await;
+    let galley = SqliteGalley::from_pool(pool);
+    let err = galley
+        .set_session_llm(sid("ghost"), Some(1), Some("x".into()))
+        .await
+        .expect_err("missing");
+    assert!(matches!(err, GalleyError::NotFound { .. }));
+}
+
 // ---------------- bump_session_after_turn ----------------
 
 #[tokio::test]

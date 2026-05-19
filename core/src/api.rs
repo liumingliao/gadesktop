@@ -171,6 +171,23 @@ pub trait GalleyApi: Send + Sync {
         origin: Origin,
     ) -> Result<SessionBrief>;
 
+    /// Persist a session's per-bridge LLM choice. Pass `index = None`
+    /// to clear (covers the rare case of a user removing their picked
+    /// LLM from mykey.py while a stored choice still points at it).
+    ///
+    /// No `origin` parameter — `replaceLLMs` fires this every time the
+    /// bridge emits a `ready` event or the user picks a new LLM, both
+    /// of which are GUI-driven and don't carry the kind of audit
+    /// signal an explicit user action does.
+    ///
+    /// **Errors**: `not_found`.
+    async fn set_session_llm(
+        &self,
+        id: SessionId,
+        index: Option<u32>,
+        display_name: Option<String>,
+    ) -> Result<SessionBrief>;
+
     /// Increment `turn_count`, refresh `summary` + `last_activity_at` +
     /// `updated_at`, and flip `has_unread = 1` when the call says so
     /// (typically when the bumped session isn't the active one in the

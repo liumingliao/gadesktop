@@ -175,6 +175,19 @@ async fn assign_session_to_project(
 }
 
 #[tauri::command]
+async fn set_session_llm(
+    id: SessionId,
+    index: Option<u32>,
+    display_name: Option<String>,
+) -> std::result::Result<SessionBrief, String> {
+    let galley = SqliteGalley::open().await.map_err(stringify_error)?;
+    galley
+        .set_session_llm(id, index, display_name)
+        .await
+        .map_err(stringify_error)
+}
+
+#[tauri::command]
 async fn bump_session_after_turn(
     id: SessionId,
     summary: Option<String>,
@@ -349,6 +362,7 @@ pub fn run() {
             set_session_pinned,
             delete_session,
             assign_session_to_project,
+            set_session_llm,
             bump_session_after_turn,
             clear_session_unread,
             bulk_archive_sessions,

@@ -566,6 +566,7 @@ signatures (Rust types):
 | `set_session_pinned` | `SessionId`, `pinned: bool`, `Origin` | `SessionBrief` |
 | `delete_session` | `SessionId`, `Origin` | `()` |
 | `assign_session_to_project` | `SessionId`, `Option<String>`, `Origin` | `SessionBrief` |
+| `set_session_llm` | `SessionId`, `index: Option<u32>`, `display_name: Option<String>` | `SessionBrief` |
 | `bump_session_after_turn` | `SessionId`, `Option<String>`, `Option<u32>`, `mark_unread: bool` | `SessionBrief` |
 | `clear_session_unread` | `SessionId` | `()` |
 | `bulk_archive_sessions` | `Vec<SessionId>`, `Origin` | `u32` |

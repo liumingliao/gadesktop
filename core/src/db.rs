@@ -927,6 +927,33 @@ impl GalleyApi for SqliteGalley {
         self.session_brief(session_id).await
     }
 
+    async fn set_session_llm(
+        &self,
+        id: SessionId,
+        index: Option<u32>,
+        display_name: Option<String>,
+    ) -> Result<SessionBrief> {
+        let now = chrono_now_iso();
+        let idx: Option<i64> = index.map(|v| v as i64);
+        let res = sqlx::query(
+            "UPDATE sessions SET llm_index = ?, llm_display_name = ?, updated_at = ? \
+             WHERE id = ?",
+        )
+        .bind(idx)
+        .bind(&display_name)
+        .bind(&now)
+        .bind(id.as_str())
+        .execute(&self.pool)
+        .await
+        .map_err(map_sqlx_err)?;
+        if res.rows_affected() == 0 {
+            return Err(GalleyError::NotFound {
+                message: format!("session {id} not found"),
+            });
+        }
+        self.session_brief(id).await
+    }
+
     async fn bump_session_after_turn(
         &self,
         id: SessionId,
