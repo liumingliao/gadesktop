@@ -5,25 +5,16 @@ import {
   backfillFtsIfEmpty,
   deleteDemoSessions,
   deleteEmptyNewSessions,
-  deleteProject as deleteProjectFromDB,
-  deleteSession as deleteSessionFromDB,
   getPref,
   loadMessagesBySession,
-  loadProjects,
-  loadSessionsViaCore,
-  persistProject,
-  persistSession,
   persistToolEventApprovalDecision,
   persistUserMessage,
   setPref,
 } from "@/lib/db";
 import { deriveSessionStatus } from "@/lib/sessions";
-import {
-  DEMO_APPROVAL_CONFIG,
-  DEMO_GA_CONFIG,
-  DEMO_SESSIONS,
-} from "@/stores/demo";
+import { DEMO_APPROVAL_CONFIG, DEMO_GA_CONFIG } from "@/stores/demo";
 import { useRuntimeStore } from "@/stores/runtime";
+import { useSessionsStore } from "@/stores/sessions";
 import { useUiStore } from "@/stores/ui";
 import { makeAppError } from "@/types/app-error";
 import type {
@@ -37,7 +28,6 @@ import type {
 } from "@/types/conversation";
 import type { MessageRow } from "@/types/db";
 import type { ApprovalDecision } from "@/types/ipc";
-import type { Project, Session } from "@/types/session";
 
 
 // LLMOption now lives in runtime.ts (M3a). Re-export here so existing
@@ -128,33 +118,11 @@ export interface SessionRuntime {
 }
 
 /**
- * Title length cap for the derived title path (`appendUserTurn` first
- * call). Chinese chars eat one cell each; ~30 fills the Sidebar
- * row's truncate window without wrapping. Beyond this we append "…"
- * to signal truncation.
+ * deriveTitleFromText / truncateSummary / DEFAULT_NEW_SESSION_TITLE all
+ * moved to gui/src/stores/sessions.ts (B3 M4b). The runtime / message
+ * actions that still live in this file route through
+ * `useSessionsStore.getState().maybeDeriveTitle(...)`.
  */
-const TITLE_DERIVE_MAX = 30;
-
-/** Same idea, for the Sidebar second-line "第 N 步 · {summary}". */
-const SUMMARY_TRUNCATE_MAX = 60;
-
-function deriveTitleFromText(text: string): string {
-  const oneLine = text.replace(/\s+/g, " ").trim();
-  if (oneLine.length <= TITLE_DERIVE_MAX) return oneLine;
-  return oneLine.slice(0, TITLE_DERIVE_MAX) + "…";
-}
-
-function truncateSummary(text: string): string {
-  const oneLine = text.replace(/\s+/g, " ").trim();
-  if (oneLine.length <= SUMMARY_TRUNCATE_MAX) return oneLine;
-  return oneLine.slice(0, SUMMARY_TRUNCATE_MAX) + "…";
-}
-
-/** "新对话" is the seed title set by `createSession`. We only auto-
- * derive a title when the row is still wearing the default placeholder
- * — once the user (or restoration) renames the session we leave it
- * alone. */
-const DEFAULT_NEW_SESSION_TITLE = "新对话";
 
 /**
  * Convert SQLite `messages` rows back into UI `Turn[]`. Walks rows in
@@ -285,33 +253,19 @@ function emptyRuntime(): SessionRuntime {
 }
 
 interface State {
-  // ---- Sessions ----
-  sessions: Session[];
-  activeSessionId: string | undefined;
-  /**
-   * Projects: user-defined drawers for grouping sessions. Pure 归类 —
-   * no cwd binding (the rootPath field is preserved on the DB row for
-   * possible future live-sync IPC, but is no longer injected into the
-   * bridge spawn; see devlog 2026-05-14). Hydrated from SQLite once
-   * on startup; mutations persist via best-effort writes (same pattern
-   * as sessions). Per PRD §7.3, Projects never alter GA's behavior.
-   */
-  projects: Project[];
-  /**
-   * When set, the Sidebar filters to show only sessions assigned to
-   * this project (plus the "Showing: ProjectName ×" banner). Not
-   * persisted across launches — fresh start = global view, fewer
-   * "where did my recents go?" moments.
-   */
-  activeProjectFilter: string | undefined;
-  /**
-   * llms / llmDisplayName / pendingLLMIndex / runtimeInfo all moved
-   * to runtimeStore in M3a (2026-05-19). Read via:
-   *   - `useRuntimeStore(s => s.byId[activeId]?.llms ?? [])`
-   *   - `useRuntimeStore(s => s.byId[activeId]?.llmDisplayName ?? "")`
-   *   - `useRuntimeStore(s => s.pendingLLMIndex)`
-   *   - `useRuntimeStore(s => s.runtimeInfo)`
-   */
+  // ---- Sessions / Projects ----
+  // Moved to sessionsStore in M4b (2026-05-19). Read via:
+  //   - useSessionsStore(s => s.sessions)
+  //   - useSessionsStore(s => s.activeSessionId)
+  //   - useSessionsStore(s => s.projects)
+  //   - useSessionsStore(s => s.activeProjectFilter)
+  //
+  // llms / llmDisplayName / pendingLLMIndex / runtimeInfo all moved
+  // to runtimeStore in M3a (2026-05-19). Read via:
+  //   - useRuntimeStore(s => s.byId[activeId]?.llms ?? [])
+  //   - useRuntimeStore(s => s.byId[activeId]?.llmDisplayName ?? "")
+  //   - useRuntimeStore(s => s.pendingLLMIndex)
+  //   - useRuntimeStore(s => s.runtimeInfo)
 
   // ---- Approval (global) ----
   /**
@@ -449,153 +403,14 @@ interface State {
 }
 
 interface Actions {
-  // Sessions
-  setActiveSession: (id: string | undefined) => void;
-  /**
-   * Create a new session row (persisted best-effort), make it the
-   * active session, and seed an empty runtime. Returns the new id
-   * so the caller can chain `activateSession(id)` to spawn its
-   * bridge. Pushes a soft-limit warning toast once `sessions.length`
-   * exceeds 10 — the architecture supports more, but the UX scales
-   * poorly past that and the LLM-API budget grows linearly.
-   */
-  /** Create a session row + activate it. Optional `projectId` ties
-   * the session to a project at birth — used when "+ New Chat" fires
-   * while the sidebar is in project-filter mode, so the new chat
-   * inherits the same drawer (and, in Phase 4, the project's cwd). */
-  createSession: (projectId?: string) => string;
-  /**
-   * Make `id` the active session and ensure its bridge is alive.
-   * Idempotent — if a connected bridge already exists for `id`,
-   * this is just a session switch. Re-spawns on `idle` / `closed` /
-   * `error` so a crashed session recovers when the user re-clicks
-   * its sidebar row.
-   */
+  // Sessions / Projects — all CRUD moved to sessionsStore in M4b.
+  // Call via useSessionsStore.getState().<action>(...) or
+  // useSessionsStore(s => s.<action>).
+  //
+  // The activateSession orchestrator stays here because it composes
+  // sessionsStore.setActiveSession + restoreSessionTurns (which reads
+  // _runtimes still owned here) + runtimeStore.spawnBridge.
   activateSession: (id: string) => Promise<void>;
-  /**
-   * Bump a session's turn_count + last_activity_at on turn_end and
-   * persist back to SQLite. Called from the IPC layer when a turn
-   * completes so Sidebar bucketing (today / week / earlier) and the
-   * "第 N 步" badge reflect activity without a full reload.
-   *
-   * Status is set to "idle" — turn_end is the canonical "agent
-   * finished this round" signal; subsequent runs flip status back
-   * to "running" via setBridgeStatus + agentRunning.
-   *
-   * `summary` (optional) is GA's per-turn summary from turn_end. When
-   * present, written into `session.summary` as `第 N 步 · {summary}`
-   * for the Sidebar two-line preview. Truncated to keep the line
-   * single-row.
-   *
-   * `stepNumber` is the per-message step the user sees ("第 N 步").
-   * Comes straight from `event.turnIndex` (GA-native, resets per
-   * user message). Distinct from the session's absolute turnCount
-   * (which keeps growing forever, used internally as the
-   * turnIndexOffset source).
-   */
-  bumpSessionAfterTurn: (
-    sessionId: string,
-    summary?: string,
-    stepNumber?: number,
-  ) => void;
-  /**
-   * Archive a session: flip its status to "archived" and persist.
-   * Archived sessions are hidden from the Sidebar's bucketed list
-   * (V0.1 simplification — no separate Archive view yet; the row
-   * stays in SQLite so a future Settings → Archive page can surface
-   * it). If the archived session has a live bridge, we keep it
-   * alive — the user might be archiving the row visually but still
-   * have an in-flight turn they want to read. Re-activation later
-   * un-archives via `unarchiveSession`.
-   *
-   * If the archived session was active, we clear activeSessionId so
-   * the main view falls back to its empty / placeholder state.
-   */
-  archiveSession: (sessionId: string) => void;
-  /** Reverse archiveSession: status back to "idle" + persist. */
-  unarchiveSession: (sessionId: string) => void;
-  /**
-   * Rename a session's title (user-facing label in the sidebar /
-   * TopBar). Trims input + falls back to the default placeholder on
-   * empty. Persists best-effort to SQLite.
-   *
-   * Interaction with first-message auto-derivation: `appendUserTurn`
-   * only auto-derives the title when it's still equal to
-   * DEFAULT_NEW_SESSION_TITLE. Once the user manually sets ANY other
-   * title (including their own choice), auto-derive stops touching
-   * the row — manual rename wins. No extra "manually-named" flag is
-   * needed.
-   */
-  renameSession: (sessionId: string, newTitle: string) => void;
-  /**
-   * Toggle the `pinned` flag on a session. Pinned sessions move to
-   * the Sidebar's Pinned bucket regardless of date — the user's
-   * escape valve for "this isn't recent but I still need it visible".
-   * Persisted to SQLite (column `pinned`) so the pin survives
-   * restart. No-op for archived sessions (they're not in the
-   * bucketed list anyway).
-   */
-  togglePinSession: (sessionId: string) => void;
-  /**
-   * Permanently delete an archived session. Cascades to its
-   * `messages` and `tool_events` rows via the SQLite FK ON DELETE
-   * CASCADE clause (001_init.sql). Destructive — UI must confirm
-   * before invoking.
-   *
-   * If the deleted session is somehow still active (shouldn't be —
-   * archive flow already cleared activeSessionId), the projection
-   * resets to the empty runtime. Also shuts down any leftover
-   * alive bridge for the session id (very rare; defensive).
-   */
-  deleteSessionPermanently: (sessionId: string) => Promise<void>;
-  /**
-   * Bulk variants for multi-select operations in EarlierDialog and
-   * ArchivedDialog. Each batches the in-memory state update into a
-   * single `set(...)` call so a 50-row archive doesn't trigger 50
-   * cascading re-renders, and dispatches all SQLite writes in
-   * parallel (the connection is async but cheap; serialization
-   * isn't needed). Single-row paths above stay untouched — they
-   * carry richer side-effects like the post-archive toast that
-   * doesn't translate cleanly to bulk.
-   */
-  archiveSessionsBulk: (sessionIds: string[]) => void;
-  unarchiveSessionsBulk: (sessionIds: string[]) => void;
-  deleteSessionsPermanentlyBulk: (sessionIds: string[]) => Promise<void>;
-
-  // ---- Projects ----
-  /**
-   * Create a new project. Returns the persisted Project so the UI
-   * (CreateProjectDialog) can optimistically navigate / select it.
-   * `rootPath` is preserved in the type for forward compatibility but
-   * is no longer wired to bridge cwd; see devlog 2026-05-14.
-   */
-  createProject: (input: { name: string; rootPath?: string }) => Promise<Project>;
-  /** Rename / toggle pin via a partial update. `rootPath` is still
-   * accepted to keep DB rows round-trippable but has no runtime
-   * effect; see devlog 2026-05-14. */
-  updateProject: (
-    id: string,
-    partial: Partial<Pick<Project, "name" | "rootPath" | "pinned">>,
-  ) => Promise<void>;
-  /** Permanent delete; sessions auto-unassigned via FK SET NULL. */
-  deleteProject: (id: string) => Promise<void>;
-  /**
-   * Assign a session to a project (or pass `null` to unassign).
-   * Updates the session row only — no bridge restart, no cwd change.
-   */
-  assignSessionToProject: (
-    sessionId: string,
-    projectId: string | null,
-  ) => Promise<void>;
-  /** Enter / exit filter mode. `undefined` clears the filter. */
-  setActiveProjectFilter: (projectId: string | undefined) => void;
-  /**
-   * Permanently delete every archived session. Destructive — UI
-   * must double-confirm (checkbox + destructive button) before
-   * invoking. Returns the count of rows deleted so the caller can
-   * show a feedback toast.
-   */
-  emptyArchive: () => Promise<number>;
   /**
    * Restore a session's `turns` from SQLite — Stage 3 Task 3 Session
    * Restore. Called by `activateSession` when the runtime is fresh
@@ -783,54 +598,36 @@ function applyRuntimeUpdate(
   const out: Partial<State> = {
     _runtimes: { ...state._runtimes, [sessionId]: newRt },
   };
-  if (sessionId === state.activeSessionId) {
+  // Top-level projection: only when this session is the active one.
+  // activeSessionId now lives in sessionsStore (M4b); read at call time.
+  const activeSessionId = useSessionsStore.getState().activeSessionId;
+  if (sessionId === activeSessionId) {
     Object.assign(out, projectionFrom(newRt));
   }
-  // Sync sidebar-visible fields onto the session row, but only if
-  // they actually changed — otherwise `sessions` reference stays
-  // identical and subscribers don't re-render.
-  const sessionIndex = state.sessions.findIndex((s) => s.id === sessionId);
-  if (sessionIndex !== -1) {
-    const session = state.sessions[sessionIndex];
-    // bridgeStatus now lives in runtimeStore (M3b) — fetch at call
-    // time to feed into the status derivation. Reading from outside
-    // the slice is fine; this is read-only.
+  // Sidebar-visible fields derived from runtime — mirror to the
+  // session row via sessionsStore. Cross-store write here is the
+  // M4b transitional pattern: useAppStore owns `_runtimes` (until
+  // M5), sessionsStore owns `sessions`. After M5 messagesStore +
+  // Rust event driving, this entry point goes away.
+  const sessionsState = useSessionsStore.getState();
+  const session = sessionsState.sessions.find((s) => s.id === sessionId);
+  if (session) {
     const bridgeStatus =
       useRuntimeStore.getState().byId[sessionId]?.bridgeStatus;
     const newStatus = deriveSessionStatus(session, newRt, bridgeStatus);
-    const newCount = newRt.pendingApprovals.length;
-    const newHasAsk = newRt.pendingAskUser !== null;
-    // Sidebar's running subline used to sync runtime.currentTurnIndex
-    // → session.currentStepIndex here to show the live "正在工作 ·
-    // 第 N 步" header. That field is gone now — the sidebar reads
-    // `session.lastStepIndex` (written by bumpSessionAfterTurn on
-    // each turn_end) instead, trading one step of lag for paired
-    // step-number + summary. Main-view's thinking placeholder still
-    // reads `runtime.currentTurnIndex` directly (via the top-level
-    // projection), so the live step number is preserved where it
-    // actually matters.
-    if (
-      session.status !== newStatus ||
-      session.pendingApprovalCount !== newCount ||
-      (session.hasPendingAskUser ?? false) !== newHasAsk
-    ) {
-      const sessions = state.sessions.slice();
-      sessions[sessionIndex] = {
-        ...session,
-        status: newStatus,
-        pendingApprovalCount: newCount,
-        hasPendingAskUser: newHasAsk,
-      };
-      out.sessions = sessions;
-    }
+    sessionsState.applyDerivedFromRuntime(sessionId, {
+      status: newStatus,
+      pendingApprovalCount: newRt.pendingApprovals.length,
+      hasPendingAskUser: newRt.pendingAskUser !== null,
+    });
   }
   return out;
 }
 
 /**
  * Pure mapping from a SessionRuntime to the State projection fields.
- * Used by setActiveSession + applyRuntimeUpdate to keep the top-level
- * fields in sync with `_runtimes[activeSessionId]`.
+ * Used by activateSession's top-level mirror refresh + applyRuntimeUpdate
+ * to keep the top-level fields in sync with `_runtimes[activeSessionId]`.
  */
 function projectionFrom(rt: SessionRuntime): {
   turns: Turn[];
@@ -872,142 +669,12 @@ function projectionFrom(rt: SessionRuntime): {
  * has something to render before bridge is connected.
  */
 
-// ---------------- Mock session builder (dev only) ----------------
-
-const MOCK_TITLES_TODAY = [
-  "重构 IPC 协议的 dataclass 验证",
-  "调研 Tauri v2 plugin-shell sidecar",
-  "整理本周设计评审纪要",
-];
-const MOCK_TITLES_WEEK = [
-  "修复 turn_end summary 偶尔丢失",
-  "shadcn Command 组件样式对齐",
-  "Sidebar 状态机的三态可视化",
-  "Bridge LRU 5 alive 行为验证",
-];
-const MOCK_TITLES_EARLIER = [
-  "Tauri vs Electron 调研结论",
-  "DESIGN.md v0.2 token 表定稿",
-  "SQLite FTS5 中文分词调研",
-  "PRD §11 审批模型补完",
-  "Stage 2 desktop skeleton 完成总结",
-  "Onboarding fs.exists health check",
-  "TopBar drag region 与 traffic light 冲突",
-  "ApprovalDock 二段确认的交互草稿",
-  "Composer auto-grow 行高计算",
-  "Sidebar bucket grouping 时区边界 bug",
-  "GA agent._turn_end_hooks 兼容测试",
-  "Inspector 面板的 tool event 时序",
-  "Settings → Approval tab 信息架构",
-  "Error Card 四种 hint 变体定稿",
-  "macOS DMG 公证流程笔记",
-];
-const MOCK_TITLES_PINNED = [
-  "GA 0.4 升级 baseline 评估",
-  "V0.2 路线图（Pin / Project / Search）",
-];
-
-const MOCK_SUMMARIES = [
-  "GA 同意按方案 B 推进",
-  "拆成 4 个独立 PR",
-  "结论是先做 trigram 兜底",
-  "等用户回 spec 后再继续",
-  "已落 commit 9c3aa1f",
-  "切到下一个 session 处理",
-  "需要补一个 e2e case",
-  "讨论后决定先不做",
-];
-
-const MOCK_STATUSES: Array<Session["status"]> = [
-  "idle",
-  "idle",
-  "idle",
-  "idle",
-  "completed",
-  "completed",
-  "error",
-];
-
-let mockBatchCounter = 0;
-
-function buildMockSessions(): Session[] {
-  const batchId = ++mockBatchCounter;
-  const now = Date.now();
-  const day = 86_400_000;
-  let titleCursor = 0;
-  let summaryCursor = 0;
-  let statusCursor = 0;
-  let idCursor = 0;
-  const make = (
-    titlePool: string[],
-    activityAtMs: number,
-    overrides: Partial<Session> = {},
-  ): Session => {
-    const title = titlePool[titleCursor++ % titlePool.length]!;
-    const summary = MOCK_SUMMARIES[summaryCursor++ % MOCK_SUMMARIES.length];
-    const status =
-      overrides.status ??
-      MOCK_STATUSES[statusCursor++ % MOCK_STATUSES.length]!;
-    const iso = new Date(activityAtMs).toISOString();
-    const id = `mock-${batchId}-${++idCursor}`;
-    return {
-      id,
-      title,
-      status,
-      summary,
-      turnCount: 2 + ((idCursor * 7) % 12),
-      pendingApprovalCount: status === "waiting_approval" ? 1 : 0,
-      errorCount: status === "error" ? 1 : 0,
-      lastActivityAt: iso,
-      createdAt: iso,
-      updatedAt: iso,
-      ...overrides,
-    };
-  };
-
-  const out: Session[] = [];
-  // Pinned: 2 rows (dates don't matter, pinned wins)
-  MOCK_TITLES_PINNED.forEach((_, i) =>
-    out.push(
-      make(MOCK_TITLES_PINNED, now - (5 + i * 3) * day, {
-        pinned: true,
-        status: "idle",
-      }),
-    ),
-  );
-  // Today: 3 rows, mix one running + one waiting_approval for icon variety
-  out.push(make(MOCK_TITLES_TODAY, now - 30 * 60_000, { status: "running" }));
-  out.push(
-    make(MOCK_TITLES_TODAY, now - 2 * 3_600_000, {
-      status: "waiting_approval",
-    }),
-  );
-  out.push(make(MOCK_TITLES_TODAY, now - 5 * 3_600_000, { status: "idle" }));
-  // This week: 4 rows spread across days 1-6
-  [1, 2, 4, 6].forEach((d) =>
-    out.push(make(MOCK_TITLES_WEEK, now - d * day - 2 * 3_600_000)),
-  );
-  // Earlier: 15 rows, days 8 .. ~420 (spans >1 year for realism)
-  const earlierDayOffsets = [
-    8, 11, 14, 19, 24, 32, 45, 58, 73, 95, 130, 180, 240, 330, 420,
-  ];
-  earlierDayOffsets.forEach((d) =>
-    out.push(make(MOCK_TITLES_EARLIER, now - d * day)),
-  );
-  return out;
-}
+// Mock session fixtures + buildMockSessions moved to sessions.ts in
+// M4b (2026-05-19). seedMockSessions now lives there too.
 
 export const useAppStore = create<AppStore>((set, get) => ({
   // ---- Initial state (demo fixtures) ----
-  sessions: DEMO_SESSIONS,
-  activeSessionId: undefined,
-  projects: [],
-  activeProjectFilter: undefined,
-  // pendingLLMIndex / runtimeInfo / petAttachedSessionId moved to
-  // runtimeStore in M3a (2026-05-19).
-
   gaConfig: DEMO_GA_CONFIG,
-
   approvalConfig: DEMO_APPROVAL_CONFIG,
   yoloMode: true,
   yoloIntroSeen: true,
@@ -1020,197 +687,57 @@ export const useAppStore = create<AppStore>((set, get) => ({
   userSubmitTick: 0,
 
   // Top-level projection starts as the empty runtime (no active
-  // session yet). setActiveSession refreshes these.
+  // session yet). sessionsStore.setActiveSession refreshes these
+  // through activateSession's projection refresh below.
   ...projectionFrom(emptyRuntime()),
 
   // ---- Sessions actions ----
-  setActiveSession: (id) => {
-    // Clearing unread on activation is the inbox metaphor — opening
-    // a session counts as reading it. Persist the cleared row so
-    // the read state survives restart. Done outside the set callback
-    // because it's a side-effect (SQLite write) we want to fire only
-    // when the targeted row actually has unread=true, not on every
-    // setActiveSession call.
-    let toPersist: Session | null = null;
-    set((state) => {
-      if (!id) {
-        // Clearing the active session (e.g. user clicked "New Chat"
-        // → lazy path). Conversation projection resets to empty, but
-        // KEEP `llms` / `llmDisplayName` — LLM config is shared
-        // across the whole GA install (mykey.py is one file), so any
-        // previously-spawned bridge has already populated the real
-        // list. (Runtime store now owns the cached LLM list; this
-        // branch's projection no longer touches LLM fields — M3a.)
-        return {
-          activeSessionId: undefined,
-          ...projectionFrom(emptyRuntime()),
-        };
-      }
-      // Delegate LLM-side pre-seed to runtimeStore. ensureRuntime
-      // is idempotent — re-activating an existing session won't
-      // overwrite the live bridge's authoritative llms; only first-
-      // activation creates the byId[sid] entry from seed.
-      const sessionIndex = state.sessions.findIndex((s) => s.id === id);
-      const sessionForActivate =
-        sessionIndex !== -1 ? state.sessions[sessionIndex] : null;
-      const runtimeStore = useRuntimeStore.getState();
-      runtimeStore.ensureRuntime(id, {
-        persistedIndex: sessionForActivate?.selectedLlmIndex,
-        persistedDisplayName: sessionForActivate?.selectedLlmDisplayName,
-        cachedLLMs: runtimeStore.cachedLLMs,
-        cachedDisplayName: runtimeStore.cachedLLMDisplayName,
-      });
-      const existing = state._runtimes[id];
-      const rt = existing ?? emptyRuntime();
-      const _runtimes = existing
-        ? state._runtimes
-        : { ...state._runtimes, [id]: rt };
-      // Clear has_unread on the activated session.
-      let sessions = state.sessions;
-      if (sessionIndex !== -1) {
-        const s = state.sessions[sessionIndex];
-        if (s.hasUnread) {
-          const cleared = { ...s, hasUnread: false };
-          sessions = state.sessions.slice();
-          sessions[sessionIndex] = cleared;
-          toPersist = cleared;
-        }
-      }
-      return {
-        activeSessionId: id,
-        _runtimes,
-        sessions,
-        ...projectionFrom(rt),
-      };
-    });
-    if (toPersist) {
-      void persistSession(toPersist).catch((e) => {
-        console.debug("[store] setActiveSession persistSession failed.", e);
-      });
-    }
-  },
+  //
+  // CRUD (setActive / create / archive / unarchive / rename / pin /
+  // delete / bulk / project ops) all moved to sessionsStore in M4b.
+  // What remains here:
+  //   - activateSession orchestrator — composes sessionsStore
+  //     setActive + restoreSessionTurns + runtimeStore.spawnBridge
+  //   - restoreSessionTurns — touches _runtimes[sid].turns (M5)
+  //
+  // The orchestrator stays out of sessionsStore so the cross-store
+  // coordination is visible (it touches all three slices). After M5
+  // and the runtime → Rust event refactor this entire function moves
+  // to sessionsStore.
 
-  createSession: (projectId) => {
-    const id = `s-${Date.now().toString(36)}-${Math.random()
-      .toString(36)
-      .slice(2, 6)}`;
-    const now = new Date().toISOString();
-    const newSession: Session = {
-      id,
-      title: DEFAULT_NEW_SESSION_TITLE,
-      status: "idle",
-      // Inherit project assignment at birth when caller passes it
-      // (Sidebar "+ New Chat" while in filter mode, or EmptyState
-      // composer submit). Project = grouping only — bridge cwd is
-      // unaffected (see devlog 2026-05-14).
-      projectId: projectId,
-      pendingApprovalCount: 0,
-      errorCount: 0,
-      lastActivityAt: now,
-      createdAt: now,
-      updatedAt: now,
-    };
+  activateSession: async (id) => {
+    // Step 1: refresh the active session pointer (clears unread on
+    // the row via Rust + sets sessionsStore.activeSessionId).
+    useSessionsStore.getState().setActiveSession(id);
+    // Step 2: lazy-init the runtime entry — LLM seed comes from the
+    // session row's persisted choice + cross-session cache.
+    const session = useSessionsStore
+      .getState()
+      .sessions.find((s) => s.id === id);
+    const runtimeStore = useRuntimeStore.getState();
+    runtimeStore.ensureRuntime(id, {
+      persistedIndex: session?.selectedLlmIndex,
+      persistedDisplayName: session?.selectedLlmDisplayName,
+      cachedLLMs: runtimeStore.cachedLLMs,
+      cachedDisplayName: runtimeStore.cachedLLMDisplayName,
+    });
+    // Step 3: lazy-init _runtimes[id] + refresh top-level projection.
     set((state) => {
+      const existing = state._runtimes[id];
+      if (existing) {
+        return projectionFrom(existing);
+      }
       const rt = emptyRuntime();
       return {
-        sessions: [newSession, ...state.sessions],
-        activeSessionId: id,
         _runtimes: { ...state._runtimes, [id]: rt },
         ...projectionFrom(rt),
       };
     });
-    // Best-effort persist. SQLite may not be available (Vite dev /
-    // first launch before tauri-plugin-sql finishes init); the in-
-    // memory session list still drives UI for this app instance.
-    void persistSession(newSession).catch((e) => {
-      console.debug("[store] createSession persistSession failed.", e);
-    });
-    // No "too many sessions" warning: LRU 5 (see _enforceLRUCap
-    // above) already caps alive bridge processes regardless of how
-    // many session rows exist; archived rows don't hold any bridge
-    // at all. Disk footprint per row is ~KB. The previous nag
-    // ("后台 bridge 进程会越来越占资源") was based on a wrong
-    // assumption and got triggered even for users who'd just done
-    // the recommended thing (archive). Sidebar searchability for
-    // very long lists is what ⌘K / bucket grouping addresses, not
-    // a forced cleanup prompt.
-    return id;
-  },
-
-  bumpSessionAfterTurn: (sessionId, summary, stepNumber) => {
-    const now = new Date().toISOString();
-    // Inbox-style unread: a finished turn in a non-active session
-    // is new content the user hasn't seen. The active session
-    // stays read — the user is on it and presumably reading.
-    // Sidebar reflects this with a brand dot + bold title via
-    // SidebarSessionRow.
-    const becameUnread = sessionId !== get().activeSessionId;
-    let updated: Session | null = null;
-    set((state) => ({
-      sessions: state.sessions.map((s) => {
-        if (s.id !== sessionId) return s;
-        const turnCount = (s.turnCount ?? 0) + 1;
-        // Store raw summary text — no "第 N 步 · " or "已完成 · "
-        // prefix at the storage layer. Sidebar rendering decides
-        // what prefix to add based on the session's current state
-        // ("第 N 步 · {summary}" while running, "已完成 · {summary}"
-        // once settled). Same summary string serves both, no DB
-        // migration needed.
-        //
-        // stepNumber is the per-message GA turnIndex of the step
-        // that just finished. We pair it with the summary so the
-        // sidebar running subline "第 N 步 · X" shows the
-        // most-recently-completed step's number AND its recap —
-        // both pieces describe the same step, no semantic mismatch.
-        //
-        // When the bridge didn't emit a summary we keep the
-        // previous one rather than wipe it — staleness beats
-        // blanking the row on every turn.
-        const nextSummary =
-          summary && summary.trim() ? truncateSummary(summary) : s.summary;
-        // Don't write `status: "idle"` here — status is derived
-        // from runtime by `deriveSessionStatus` (via
-        // `applyRuntimeUpdate`'s in-place sync). turn_end is
-        // per-step, not terminal; forcing "idle" here was the
-        // reason the sidebar flipped to "已完成" mid-run.
-        updated = {
-          ...s,
-          turnCount,
-          summary: nextSummary,
-          lastStepIndex:
-            typeof stepNumber === "number" && stepNumber > 0
-              ? stepNumber
-              : s.lastStepIndex,
-          lastActivityAt: now,
-          updatedAt: now,
-          hasUnread: becameUnread ? true : s.hasUnread,
-        };
-        return updated;
-      }),
-    }));
-    // Best-effort write-back to SQLite. Vite-only dev / first launch
-    // are non-fatal; the in-memory bump still drives sidebar rendering
-    // for the current app instance.
-    if (updated) {
-      void persistSession(updated).catch((e) => {
-        console.debug("[store] bumpSessionAfterTurn persistSession failed.", e);
-      });
-    }
-  },
-
-  activateSession: async (id) => {
-    // setActiveSession lazy-inits the runtime and refreshes the
-    // top-level projection from _runtimes[id].
-    get().setActiveSession(id);
-    // Restore conversation turns from SQLite when this is the first
-    // time we're touching this session in the current app instance.
-    // `_runtimes[id].turns.length === 0` is a safe proxy for "fresh
-    // runtime" because once IPC starts streaming, even an empty
-    // SQLite history won't keep turns at zero. We skip restoration
-    // for sessions that already have in-memory turns to avoid
-    // duplicating rows across multiple activations.
+    // Step 4: restore conversation turns from SQLite on first touch
+    // in this app instance. `_runtimes[id].turns.length === 0` is a
+    // safe proxy for "fresh runtime" — once IPC starts streaming,
+    // even an empty SQLite history won't keep turns at zero.
     const rt = get()._runtimes[id];
-    const session = get().sessions.find((s) => s.id === id);
     const looksFresh = !rt || rt.turns.length === 0;
     const hasHistory = (session?.turnCount ?? 0) > 0;
     if (looksFresh && hasHistory) {
@@ -1220,13 +747,14 @@ export const useAppStore = create<AppStore>((set, get) => ({
         console.warn("[store] activateSession restoreSessionTurns failed.", e);
       }
     }
-    // Auto-spawn the bridge when this session has no live one.
-    // Re-spawn on `closed` / `error` lets a kill or crash recover
-    // by simply re-clicking the session. `closed` is also how the
-    // LRU governor signals "suspended" — re-activation regenerates
-    // the bridge and the IPC `ready` handler replays SQLite history.
-    const runtimeForActivate = useRuntimeStore.getState().byId[id];
-    const bridgeStatus = runtimeForActivate?.bridgeStatus ?? "idle";
+    // Step 5: auto-spawn the bridge when this session has no live
+    // one. Re-spawn on `closed` / `error` lets a kill or crash
+    // recover by simply re-clicking the session. `closed` is also
+    // how the LRU governor signals "suspended" — re-activation
+    // regenerates the bridge and the IPC `ready` handler replays
+    // SQLite history.
+    const bridgeStatus =
+      useRuntimeStore.getState().byId[id]?.bridgeStatus ?? "idle";
     const needsSpawn =
       bridgeStatus === "idle" ||
       bridgeStatus === "closed" ||
@@ -1237,7 +765,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
       // chdir away from the GA install dir and silently break GA's
       // relative `./memory/...` reads (memory_management_sop, any
       // user SOP, etc.). See devlog 2026-05-14 rootPath rollback.
-      const session = get().sessions.find((s) => s.id === id);
+      //
       // EmptyState's inline LLM picker stashes `pendingLLMIndex`
       // because there was no live bridge to set_llm against. Apply
       // it here as `--llm-no` only when the session is genuinely
@@ -1275,391 +803,6 @@ export const useAppStore = create<AppStore>((set, get) => ({
     }
     // Already alive — runtimeStore.spawnBridge internally LRU-touches
     // on each call, so the alive-bridge branch is now a no-op here.
-  },
-
-  archiveSession: (sessionId) => {
-    const now = new Date().toISOString();
-    let updated: Session | null = null;
-    let archivedTitle = "";
-    set((state) => {
-      const sessions = state.sessions.map((s) => {
-        if (s.id !== sessionId) return s;
-        archivedTitle = s.title;
-        updated = { ...s, status: "archived", updatedAt: now };
-        return updated;
-      });
-      // Clear active session if the one being archived was active —
-      // the main view falls back to the empty state seamlessly.
-      const activeSessionId =
-        state.activeSessionId === sessionId
-          ? undefined
-          : state.activeSessionId;
-      return { sessions, activeSessionId };
-    });
-    if (updated) {
-      void persistSession(updated).catch((e) => {
-        console.debug("[store] archiveSession persistSession failed.", e);
-      });
-      // UX feedback: archiving makes the row vanish from the
-      // sidebar, which on its own reads as "did anything happen?".
-      // A short info toast confirms the action — eventually V0.2
-      // upgrades this to include an Undo affordance.
-      useUiStore.getState().pushToast(
-        makeAppError({
-          category: "business",
-          severity: "info",
-          title: "已 Archive",
-          message: archivedTitle,
-          hint: null,
-          retryable: false,
-          context: "archiveSession",
-          traceback: null,
-        }),
-      );
-    }
-  },
-
-  unarchiveSession: (sessionId) => {
-    const now = new Date().toISOString();
-    let updated: Session | null = null;
-    set((state) => ({
-      sessions: state.sessions.map((s) => {
-        if (s.id !== sessionId) return s;
-        updated = { ...s, status: "idle", updatedAt: now };
-        return updated;
-      }),
-    }));
-    if (updated) {
-      void persistSession(updated).catch((e) => {
-        console.debug("[store] unarchiveSession persistSession failed.", e);
-      });
-    }
-  },
-
-  renameSession: (sessionId, newTitle) => {
-    // Trim + sanitize. Empty after trim → fall back to default
-    // placeholder so we never persist a literally-empty title (which
-    // would render the sidebar row as a blank line with no anchor).
-    const cleaned = newTitle.trim();
-    const finalTitle = cleaned === "" ? DEFAULT_NEW_SESSION_TITLE : cleaned;
-    const now = new Date().toISOString();
-    let updated: Session | null = null;
-    set((state) => ({
-      sessions: state.sessions.map((s) => {
-        if (s.id !== sessionId) return s;
-        if (s.title === finalTitle) return s; // no-op if unchanged
-        updated = { ...s, title: finalTitle, updatedAt: now };
-        return updated;
-      }),
-    }));
-    if (updated) {
-      void persistSession(updated).catch((e) => {
-        console.debug("[store] renameSession persistSession failed.", e);
-      });
-    }
-  },
-
-  togglePinSession: (sessionId) => {
-    const now = new Date().toISOString();
-    let updated: Session | null = null;
-    set((state) => ({
-      sessions: state.sessions.map((s) => {
-        if (s.id !== sessionId) return s;
-        if (s.status === "archived") return s;
-        updated = { ...s, pinned: !s.pinned, updatedAt: now };
-        return updated;
-      }),
-    }));
-    if (updated) {
-      void persistSession(updated).catch((e) => {
-        console.debug("[store] togglePinSession persistSession failed.", e);
-      });
-    }
-  },
-
-  // ---- Projects ----
-
-  createProject: async ({ name, rootPath }) => {
-    const now = new Date().toISOString();
-    const id = `proj_${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`;
-    const next: Project = {
-      id,
-      name: name.trim(),
-      rootPath: rootPath?.trim() || undefined,
-      pinned: false,
-      lastActivityAt: now,
-      createdAt: now,
-      updatedAt: now,
-    };
-    set((state) => ({ projects: [next, ...state.projects] }));
-    try {
-      await persistProject(next);
-    } catch (e) {
-      console.debug("[store] createProject persistProject failed.", e);
-    }
-    return next;
-  },
-
-  updateProject: async (id, partial) => {
-    const now = new Date().toISOString();
-    let updated: Project | null = null;
-    set((state) => ({
-      projects: state.projects.map((p) => {
-        if (p.id !== id) return p;
-        updated = {
-          ...p,
-          ...partial,
-          // Normalise empty rootPath to undefined for DB tidiness.
-          // The field has no runtime effect post-2026-05-14 rollback.
-          rootPath:
-            partial.rootPath !== undefined
-              ? partial.rootPath?.trim() || undefined
-              : p.rootPath,
-          name: partial.name !== undefined ? partial.name.trim() : p.name,
-          updatedAt: now,
-        };
-        return updated;
-      }),
-    }));
-    if (updated) {
-      try {
-        await persistProject(updated);
-      } catch (e) {
-        console.debug("[store] updateProject persistProject failed.", e);
-      }
-    }
-  },
-
-  deleteProject: async (id) => {
-    // FK `ON DELETE SET NULL` on sessions.project_id auto-unassigns
-    // any rows that pointed here — sessions stay, just lose their
-    // project. We mirror that in memory so the sidebar doesn't show
-    // ghost assignments after the row is gone.
-    set((state) => ({
-      projects: state.projects.filter((p) => p.id !== id),
-      sessions: state.sessions.map((s) =>
-        s.projectId === id ? { ...s, projectId: undefined } : s,
-      ),
-      activeProjectFilter:
-        state.activeProjectFilter === id ? undefined : state.activeProjectFilter,
-    }));
-    try {
-      await deleteProjectFromDB(id);
-    } catch (e) {
-      console.debug("[store] deleteProject DB failed.", e);
-    }
-  },
-
-  assignSessionToProject: async (sessionId, projectId) => {
-    const now = new Date().toISOString();
-    let updated: Session | null = null;
-    set((state) => {
-      const sessions = state.sessions.map((s) => {
-        if (s.id !== sessionId) return s;
-        updated = {
-          ...s,
-          projectId: projectId ?? undefined,
-          updatedAt: now,
-        };
-        return updated;
-      });
-      return { sessions };
-    });
-    if (updated) {
-      try {
-        await persistSession(updated);
-      } catch (e) {
-        console.debug("[store] assignSessionToProject persistSession failed.", e);
-      }
-    }
-  },
-
-  setActiveProjectFilter: (projectId) =>
-    set({ activeProjectFilter: projectId }),
-
-  // ---- Bulk variants (multi-select in EarlierDialog / ArchivedDialog) ----
-  //
-  // Each one does the in-memory update in a single `set` so the
-  // sidebar doesn't re-render N times when the user archives a big
-  // batch, then persists each row to SQLite in parallel. Toast
-  // feedback for archive uses a single rolled-up message rather
-  // than N individual ones.
-
-  archiveSessionsBulk: (sessionIds) => {
-    if (sessionIds.length === 0) return;
-    const now = new Date().toISOString();
-    const idSet = new Set(sessionIds);
-    const updatedRows: Session[] = [];
-    set((state) => {
-      const sessions = state.sessions.map((s) => {
-        if (!idSet.has(s.id)) return s;
-        if (s.status === "archived") return s;
-        const next: Session = { ...s, status: "archived", updatedAt: now };
-        updatedRows.push(next);
-        return next;
-      });
-      const activeSessionId =
-        state.activeSessionId && idSet.has(state.activeSessionId)
-          ? undefined
-          : state.activeSessionId;
-      return { sessions, activeSessionId };
-    });
-    void Promise.all(
-      updatedRows.map((s) =>
-        persistSession(s).catch((e) => {
-          console.debug(
-            `[store] archiveSessionsBulk persistSession failed for ${s.id}.`,
-            e,
-          );
-        }),
-      ),
-    );
-    if (updatedRows.length > 0) {
-      useUiStore.getState().pushToast(
-        makeAppError({
-          category: "business",
-          severity: "info",
-          title: `已归档 ${updatedRows.length} 个对话`,
-          message: "",
-          hint: null,
-          retryable: false,
-          context: "archiveSessionsBulk",
-          traceback: null,
-        }),
-      );
-    }
-  },
-
-  unarchiveSessionsBulk: (sessionIds) => {
-    if (sessionIds.length === 0) return;
-    const now = new Date().toISOString();
-    const idSet = new Set(sessionIds);
-    const updatedRows: Session[] = [];
-    set((state) => ({
-      sessions: state.sessions.map((s) => {
-        if (!idSet.has(s.id)) return s;
-        if (s.status !== "archived") return s;
-        const next: Session = { ...s, status: "idle", updatedAt: now };
-        updatedRows.push(next);
-        return next;
-      }),
-    }));
-    void Promise.all(
-      updatedRows.map((s) =>
-        persistSession(s).catch((e) => {
-          console.debug(
-            `[store] unarchiveSessionsBulk persistSession failed for ${s.id}.`,
-            e,
-          );
-        }),
-      ),
-    );
-  },
-
-  deleteSessionsPermanentlyBulk: async (sessionIds) => {
-    if (sessionIds.length === 0) return;
-    // Defensive bridge teardown for each — the same guard the
-    // single-row path does. Done sequentially with awaits so we
-    // don't fire N parallel shutdowns racing the same process tree.
-    for (const id of sessionIds) {
-      try {
-        // shutdownBridge no-ops when no client is alive — the previous
-        // `getBridgeClient(id)` precondition check was just an
-        // optimisation. After M3b moved bridge state into runtimeStore,
-        // querying liveness from outside the slice is no longer
-        // exposed; calling the action unconditionally is safe.
-        await useRuntimeStore.getState().shutdownBridge(id);
-      } catch (e) {
-        console.warn(
-          `[store] deleteSessionsPermanentlyBulk shutdownBridge failed for ${id}.`,
-          e,
-        );
-      }
-    }
-    const idSet = new Set(sessionIds);
-    set((state) => {
-      const sessions = state.sessions.filter((s) => !idSet.has(s.id));
-      const _runtimes = { ...state._runtimes };
-      for (const id of sessionIds) delete _runtimes[id];
-      const out: Partial<typeof state> = { sessions, _runtimes };
-      if (state.activeSessionId && idSet.has(state.activeSessionId)) {
-        out.activeSessionId = undefined;
-        Object.assign(out, projectionFrom(emptyRuntime()));
-      }
-      return out;
-    });
-    await Promise.all(
-      sessionIds.map((id) =>
-        deleteSessionFromDB(id).catch((e) => {
-          console.warn(
-            `[store] deleteSessionsPermanentlyBulk SQLite delete failed for ${id}.`,
-            e,
-          );
-        }),
-      ),
-    );
-  },
-
-  deleteSessionPermanently: async (sessionId) => {
-    // Defensive: kill any lingering bridge before yanking the row.
-    // Archived sessions shouldn't have a live bridge (archiveSession
-    // doesn't kill one, but LRU 5 typically reaps them); covering
-    // the edge so we don't leak a process pointing at a deleted id.
-    try {
-      await useRuntimeStore.getState().shutdownBridge(sessionId);
-    } catch (e) {
-      console.warn(
-        "[store] deleteSessionPermanently shutdownBridge failed.",
-        e,
-      );
-    }
-    // Remove from in-memory state first so the UI updates even if
-    // SQLite is unavailable (Vite-only dev). _runtimes entry is
-    // also dropped so memory doesn't slowly leak per delete.
-    set((state) => {
-      const sessions = state.sessions.filter((s) => s.id !== sessionId);
-      const _runtimes = { ...state._runtimes };
-      delete _runtimes[sessionId];
-      const out: Partial<typeof state> = { sessions, _runtimes };
-      if (state.activeSessionId === sessionId) {
-        out.activeSessionId = undefined;
-        Object.assign(out, projectionFrom(emptyRuntime()));
-      }
-      return out;
-    });
-    // Drop SQLite row (FK ON DELETE CASCADE handles messages +
-    // tool_events). Best-effort: if SQLite is unavailable the
-    // in-memory state is already updated; the row will be a ghost
-    // until next app run + load. That's an accepted trade-off given
-    // we don't want to block the UI on disk.
-    try {
-      await deleteSessionFromDB(sessionId);
-    } catch (e) {
-      console.warn(
-        "[store] deleteSessionPermanently SQLite delete failed.",
-        e,
-      );
-    }
-  },
-
-  emptyArchive: async () => {
-    const archived = get().sessions.filter((s) => s.status === "archived");
-    if (archived.length === 0) return 0;
-    // Sequential rather than Promise.all — each one talks to SQLite
-    // and the operations are cheap; serial keeps the in-memory state
-    // and DB ordering predictable, and any failure can be logged
-    // against the specific session that broke.
-    for (const s of archived) {
-      try {
-        await useAppStore.getState().deleteSessionPermanently(s.id);
-      } catch (e) {
-        console.warn(
-          `[store] emptyArchive: failed to delete ${s.id}.`,
-          e,
-        );
-      }
-    }
-    return archived.length;
   },
 
   restoreSessionTurns: async (sessionId) => {
@@ -1823,13 +966,13 @@ export const useAppStore = create<AppStore>((set, get) => ({
 
   // ---- Conversation (per-session) ----
   appendUserTurn: (sessionId, text) => {
-    let titleDerived: { sessionId: string; title: string } | null = null;
     // Snapshot turnCount before any state mutation; this is the
     // offset that should map GA's 1-based per-loop turn indices
     // onto absolute session-wide indices. See SessionRuntime
     // doc comment for the full rationale.
+    const sessionsState = useSessionsStore.getState();
     const currentTurnCount =
-      get().sessions.find((s) => s.id === sessionId)?.turnCount ?? 0;
+      sessionsState.sessions.find((s) => s.id === sessionId)?.turnCount ?? 0;
     set((state) => {
       const update = applyRuntimeUpdate(state, sessionId, (rt) => ({
         ...rt,
@@ -1861,47 +1004,19 @@ export const useAppStore = create<AppStore>((set, get) => ({
       // because session switching shouldn't trigger this effect —
       // see `userSubmitTick` doc comment in State.
       update.userSubmitTick = state.userSubmitTick + 1;
-      // Derive a Sidebar title from the first user message — but only
-      // once, and only when the row is still wearing the seed
-      // "新对话" placeholder. Renaming a user-edited title would be
-      // worse than no rename.
-      //
-      // `applyRuntimeUpdate` may have already produced a new `sessions`
-      // (sidebar status / approval-count sync), so we layer this on
-      // top of whichever array is freshest.
-      const baseSessions = update.sessions ?? state.sessions;
-      const idx = baseSessions.findIndex((s) => s.id === sessionId);
-      if (idx !== -1) {
-        const session = baseSessions[idx];
-        if (session.title === DEFAULT_NEW_SESSION_TITLE && text.trim()) {
-          const newTitle = deriveTitleFromText(text);
-          const sessions = baseSessions.slice();
-          sessions[idx] = { ...session, title: newTitle };
-          update.sessions = sessions;
-          titleDerived = { sessionId, title: newTitle };
-        }
-      }
       return update;
     });
-    if (titleDerived) {
-      // Best-effort persist so the derived title survives an app
-      // restart. SQLite unavailable in pre-Tauri dev is non-fatal.
-      const snap = get().sessions.find(
-        (s) => s.id === titleDerived!.sessionId,
-      );
-      if (snap) {
-        void persistSession(snap).catch((e) => {
-          console.debug("[store] appendUserTurn persistSession failed.", e);
-        });
-      }
-    }
+    // Derive a Sidebar title from the first user message — but only
+    // once, and only when the row is still wearing the seed "新对话"
+    // placeholder. sessionsStore handles the trim / fallback / Rust
+    // persist; this call is a no-op when the title has been edited.
+    useSessionsStore.getState().maybeDeriveTitle(sessionId, text);
     // Persist the user message to SQLite for Session Restore. turnIndex
     // is derived as `turnCount + 1` because GA hasn't emitted turn_start
     // yet — that event arrives after the bridge starts processing
     // user_message and confirms our local guess. The pairing holds
     // because GA always assigns one turn per user message.
-    const sessionSnap = get().sessions.find((s) => s.id === sessionId);
-    const nextTurnIndex = (sessionSnap?.turnCount ?? 0) + 1;
+    const nextTurnIndex = currentTurnCount + 1;
     void persistUserMessage({
       sessionId,
       turnIndex: nextTurnIndex,
@@ -1915,9 +1030,9 @@ export const useAppStore = create<AppStore>((set, get) => ({
     // Mirror of appendUserTurn — see that action's comments for rationale
     // on each field. Difference: skips `persistUserMessage` because Rust
     // already wrote the row before emitting `user-message-persisted`.
-    let titleDerived: { sessionId: string; title: string } | null = null;
     const currentTurnCount =
-      get().sessions.find((s) => s.id === sessionId)?.turnCount ?? 0;
+      useSessionsStore.getState().sessions.find((s) => s.id === sessionId)
+        ?.turnCount ?? 0;
     set((state) => {
       const update = applyRuntimeUpdate(state, sessionId, (rt) => ({
         ...rt,
@@ -1929,33 +1044,9 @@ export const useAppStore = create<AppStore>((set, get) => ({
         turnIndexOffset: currentTurnCount,
       }));
       update.userSubmitTick = state.userSubmitTick + 1;
-      const baseSessions = update.sessions ?? state.sessions;
-      const idx = baseSessions.findIndex((s) => s.id === sessionId);
-      if (idx !== -1) {
-        const session = baseSessions[idx];
-        if (session.title === DEFAULT_NEW_SESSION_TITLE && text.trim()) {
-          const newTitle = deriveTitleFromText(text);
-          const sessions = baseSessions.slice();
-          sessions[idx] = { ...session, title: newTitle };
-          update.sessions = sessions;
-          titleDerived = { sessionId, title: newTitle };
-        }
-      }
       return update;
     });
-    if (titleDerived) {
-      const snap = get().sessions.find(
-        (s) => s.id === titleDerived!.sessionId,
-      );
-      if (snap) {
-        void persistSession(snap).catch((e) => {
-          console.debug(
-            "[store] appendUserTurnExternal persistSession failed.",
-            e,
-          );
-        });
-      }
-    }
+    useSessionsStore.getState().maybeDeriveTitle(sessionId, text);
   },
 
   appendAgentTurn: (sessionId, turn) =>
@@ -2173,26 +1264,12 @@ export const useAppStore = create<AppStore>((set, get) => ({
           e,
         );
       }
-      // B1 M6 migration template: this read goes through Rust core
-      // (`SqliteGalley::list_sessions` → Tauri command → JS adapter).
-      // Behaviour matches legacy `loadSessions()` — see
-      // `loadSessionsViaCore` docstring for the migration pattern.
-      const sessions = await loadSessionsViaCore();
-      // No demo-seed on first launch. DEMO_SESSIONS stay as the
-      // in-memory initial state for the brief moment before
-      // hydrate resolves; if the user has zero real sessions, the
-      // sidebar shows its empty-state hint and prompts a "New chat".
-      set({ sessions });
-      // Projects hydrate alongside sessions — they're the drawers
-      // sessions can live in, so loading them in the same pass keeps
-      // the sidebar render path consistent (no half-state where
-      // sessions reference projectIds that aren't in memory yet).
-      try {
-        const projects = await loadProjects();
-        set({ projects });
-      } catch (e) {
-        console.debug("[store] hydrateFromDB: loadProjects failed.", e);
-      }
+      // B3 M4b: sessions + projects hydrate moved to sessionsStore.
+      // The slice talks to Rust core (`list_sessions` / `list_projects`
+      // Tauri commands) directly; useAppStore just kicks off the load
+      // so the in-memory state is ready by the time the sidebar
+      // renders.
+      await useSessionsStore.getState().hydrate();
       // One-time backfill of the FTS index for users upgrading
       // past the 004 migration. Idempotent — returns immediately
       // when the index is already in sync.
@@ -2334,19 +1411,11 @@ export const useAppStore = create<AppStore>((set, get) => ({
   },
 
   seedMockSessions: async () => {
-    const batch = buildMockSessions();
-    set((state) => ({ sessions: [...batch, ...state.sessions] }));
-    // Persist sequentially — the batch is small (~20 rows) and
-    // SQLite writes are fast; parallel awaits would just race on
-    // the same connection.
-    for (const s of batch) {
-      try {
-        await persistSession(s);
-      } catch (e) {
-        console.debug("[store] seedMockSessions persistSession failed.", e);
-      }
-    }
-    console.info(`[store] seedMockSessions: inserted ${batch.length} rows.`);
+    // Forwarded to sessionsStore — fixtures + persistence both live
+    // there now. Kept as a top-level action so existing dev shortcuts
+    // (`__store.getState().seedMockSessions()` in DevTools) keep
+    // working without a doc update.
+    await useSessionsStore.getState().seedMockSessions();
   },
 }));
 

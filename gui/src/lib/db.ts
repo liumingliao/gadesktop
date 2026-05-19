@@ -1,13 +1,6 @@
-import { invoke } from "@tauri-apps/api/core";
 import Database from "@tauri-apps/plugin-sql";
 
-import type { Project, Session, SessionStatus } from "@/types/session";
-import type {
-  MessageRow,
-  ProjectRow,
-  SessionRow,
-  ToolEventRow,
-} from "@/types/db";
+import type { MessageRow, ToolEventRow } from "@/types/db";
 import type { ApprovalDecision } from "@/types/ipc";
 
 /**
@@ -50,192 +43,14 @@ export function _resetDBForTest(): void {
 }
 
 // ---------------- sessions ----------------
-
-/**
- * SessionBrief wire shape — what `core/src/api/session.rs::SessionBrief`
- * serializes to over Tauri invoke. Field set is a subset of {@link Session}:
- * the durable / agent-facing fields plus optional pinned / hasUnread.
- * Transient runtime fields (pid, currentTool, pendingApprovalCount,
- * errorCount, hasPendingAskUser, lastStepIndex) are intentionally
- * excluded — they belong to the in-memory runtime model that B2's
- * runner-manager will own. M6's adapter defaults them to 0 / undefined.
- */
-interface SessionBriefWire {
-  id: string;
-  projectId?: string;
-  title: string;
-  status: SessionStatus;
-  summary?: string;
-  turnCount?: number;
-  lastActivityAt: string;
-  createdAt: string;
-  updatedAt: string;
-  pinned?: boolean;
-  hasUnread?: boolean;
-  selectedLlmIndex?: number;
-  selectedLlmDisplayName?: string;
-}
-
-/**
- * Galley Core-backed session list. Migration pattern for B2 / B3:
- *
- *   1. Add `GalleyApi` trait method in `core/src/api.rs`.
- *   2. Implement in `core/src/db.rs` (`impl GalleyApi for SqliteGalley`).
- *   3. Add a `#[tauri::command]` wrapper in `core/src/lib.rs` + register
- *      in `tauri::generate_handler!`.
- *   4. Add an `X_via_core()` invoker here (this function is the template).
- *   5. Migrate the call site from `X()` to `X_via_core()`.
- *   6. Mark the old `X()` with `@deprecated`; remove later when no
- *      callers remain.
- *
- * Argument shape: Tauri's `invoke` receives the second argument as a
- * map matching the Rust function's parameter names. Our Rust signature
- * is `list_sessions(filter: SessionFilter)` so the JS call passes
- * `{ filter: <SessionFilter JSON> }`. `SessionFilter` is camelCase via
- * `#[serde(rename_all = "camelCase")]`.
- *
- * Empty filter → matches legacy `loadSessions()` behaviour (returns
- * archived + active, recency desc). Sidebar / store filters for
- * display.
- */
-export async function loadSessionsViaCore(): Promise<Session[]> {
-  const briefs = await invoke<SessionBriefWire[]>("list_sessions", {
-    filter: {},
-  });
-  return briefs.map(sessionFromBrief);
-}
-
-function sessionFromBrief(b: SessionBriefWire): Session {
-  return {
-    id: b.id,
-    projectId: b.projectId,
-    title: b.title,
-    // Same transient-status healing the legacy path does. SessionBrief
-    // can carry transient status if SQLite happened to hold a stale
-    // value (rare — persistableStatus coerces on write — but the heal
-    // remains harmless).
-    status: persistableStatus(b.status),
-    summary: b.summary,
-    turnCount: b.turnCount ?? 0,
-    // Transient runtime fields — SessionBrief omits these intentionally
-    // (see SessionBriefWire docstring). They populate from IPC events
-    // (bridge / B2's runner-manager) once a runner is alive, or stay
-    // 0 / undefined for sessions whose runner isn't running.
-    pendingApprovalCount: 0,
-    errorCount: 0,
-    currentTool: undefined,
-    pid: undefined,
-    cwd: undefined,
-    pinned: b.pinned ?? false,
-    hasUnread: b.hasUnread ?? false,
-    lastActivityAt: b.lastActivityAt,
-    createdAt: b.createdAt,
-    updatedAt: b.updatedAt,
-    selectedLlmIndex: b.selectedLlmIndex,
-    selectedLlmDisplayName: b.selectedLlmDisplayName,
-  };
-}
-
-/**
- * @deprecated B1 M3 — Rust port available at `galley_core_lib::db::SqliteGalley::list_sessions`,
- * exposed via Tauri command `list_sessions` and JS-side wrapper
- * {@link loadSessionsViaCore}. Migrate call sites to the new wrapper
- * then delete this once no callers remain. Kept alive in parallel per
- * refactor/invariants.md §I1.
- */
-export async function loadSessions(): Promise<Session[]> {
-  const db = await getDB();
-  const rows = await db.select<SessionRow[]>(
-    "SELECT * FROM sessions ORDER BY last_activity_at DESC",
-  );
-  return rows.map(sessionFromRow);
-}
-
-/**
- * SessionStatus is a tagged union of two categories:
- *
- *   Durable  : archived / completed / cancelled
- *     User/system decisions that should persist across app restarts.
- *
- *   Transient: idle / connecting / running / waiting_approval / error
- *     Pure runtime projections from `_runtimes[id]` via
- *     `deriveSessionStatus`. Meaningless once the process exits.
- *
- * Persisting a transient status would create stale "正在工作…" /
- * "error" sidebar rows on cold start — there's no runtime to back
- * them up. We coerce all transients to "idle" both on write (so
- * SQLite never holds a misleading value) and on read (so any
- * already-stale rows from earlier code paths heal on next load
- * without a migration).
- */
-const DURABLE_SESSION_STATUSES = new Set<SessionStatus>([
-  "archived",
-  "completed",
-  "cancelled",
-]);
-
-function persistableStatus(s: SessionStatus): SessionStatus {
-  return DURABLE_SESSION_STATUSES.has(s) ? s : "idle";
-}
-
-export async function persistSession(s: Session): Promise<void> {
-  const db = await getDB();
-  await db.execute(
-    `INSERT INTO sessions (
-       id, project_id, title, status, summary, turn_count, current_tool,
-       pending_approval_count, error_count, pid, cwd, pinned,
-       llm_index, llm_display_name, has_unread,
-       last_activity_at, created_at, updated_at
-     ) VALUES (
-       $1, $2, $3, $4, $5, $6, $7,
-       $8, $9, $10, $11, $12,
-       $13, $14, $15,
-       $16, $17, $18
-     )
-     ON CONFLICT(id) DO UPDATE SET
-       project_id             = excluded.project_id,
-       title                  = excluded.title,
-       status                 = excluded.status,
-       summary                = excluded.summary,
-       turn_count             = excluded.turn_count,
-       current_tool           = excluded.current_tool,
-       pending_approval_count = excluded.pending_approval_count,
-       error_count            = excluded.error_count,
-       pid                    = excluded.pid,
-       cwd                    = excluded.cwd,
-       pinned                 = excluded.pinned,
-       llm_index              = excluded.llm_index,
-       llm_display_name       = excluded.llm_display_name,
-       has_unread             = excluded.has_unread,
-       last_activity_at       = excluded.last_activity_at,
-       updated_at             = excluded.updated_at`,
-    [
-      s.id,
-      s.projectId ?? null,
-      s.title,
-      persistableStatus(s.status),
-      s.summary ?? null,
-      s.turnCount ?? 0,
-      s.currentTool ?? null,
-      s.pendingApprovalCount,
-      s.errorCount,
-      s.pid ?? null,
-      s.cwd ?? null,
-      s.pinned ? 1 : 0,
-      s.selectedLlmIndex ?? null,
-      s.selectedLlmDisplayName ?? null,
-      s.hasUnread ? 1 : 0,
-      s.lastActivityAt,
-      s.createdAt,
-      s.updatedAt,
-    ],
-  );
-}
-
-export async function deleteSession(id: string): Promise<void> {
-  const db = await getDB();
-  await db.execute("DELETE FROM sessions WHERE id = $1", [id]);
-}
+//
+// All session writes (create / archive / rename / pin / delete +
+// bulk variants + project CRUD) moved to sessionsStore in M4b
+// (2026-05-19). They invoke the Rust GalleyApi trait methods through
+// Tauri commands; the tauri-plugin-sql direct SQL surface that used
+// to live here is gone. The mapper helpers + a couple of sweep
+// utilities are still in this file because they have no good slice
+// home (yet).
 
 /**
  * Sweep "absolutely empty" sessions on launch — title still at the
@@ -285,101 +100,10 @@ export async function deleteDemoSessions(): Promise<number> {
   return result.rowsAffected ?? 0;
 }
 
-// ---------------- projects ----------------
-
-export async function loadProjects(): Promise<Project[]> {
-  const db = await getDB();
-  // Sort order matches DESIGN.md §4.2 "F. Project 排序":
-  //   pinned desc, last_activity_at desc.
-  const rows = await db.select<ProjectRow[]>(
-    "SELECT * FROM projects ORDER BY pinned DESC, last_activity_at DESC",
-  );
-  return rows.map(projectFromRow);
-}
-
-/**
- * Permanently remove a project row. SQLite's FK `ON DELETE SET NULL`
- * on `sessions.project_id` auto-unassigns any sessions that belonged
- * to it — the sessions themselves stay (per PRD §7.3 "删除 Project
- * 时，里面的 sessions 不删除"). Idempotent: deleting a non-existent
- * id is a no-op.
- */
-export async function deleteProject(id: string): Promise<void> {
-  const db = await getDB();
-  await db.execute("DELETE FROM projects WHERE id = $1", [id]);
-}
-
-export async function persistProject(p: Project): Promise<void> {
-  const db = await getDB();
-  await db.execute(
-    `INSERT INTO projects (
-       id, name, root_path, icon, color, pinned, last_activity_at,
-       created_at, updated_at
-     ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-     ON CONFLICT(id) DO UPDATE SET
-       name             = excluded.name,
-       root_path        = excluded.root_path,
-       icon             = excluded.icon,
-       color            = excluded.color,
-       pinned           = excluded.pinned,
-       last_activity_at = excluded.last_activity_at,
-       updated_at       = excluded.updated_at`,
-    [
-      p.id,
-      p.name,
-      p.rootPath ?? null,
-      p.icon ?? null,
-      p.color ?? null,
-      p.pinned ? 1 : 0,
-      p.lastActivityAt,
-      p.createdAt,
-      p.updatedAt,
-    ],
-  );
-}
-
-// ---------------- mappers ----------------
-
-function sessionFromRow(r: SessionRow): Session {
-  return {
-    id: r.id,
-    projectId: r.project_id ?? undefined,
-    title: r.title,
-    // Heal stale transient status from older SQLite rows (a row
-    // persisted with status="running" mid-loop has no runtime to back
-    // it up after restart). persistSession already coerces on write,
-    // but this load-side guard fixes data that pre-dates that fix.
-    status: persistableStatus(r.status as SessionStatus),
-    summary: r.summary ?? undefined,
-    turnCount: r.turn_count,
-    currentTool: r.current_tool ?? undefined,
-    pendingApprovalCount: r.pending_approval_count,
-    errorCount: r.error_count,
-    pid: r.pid ?? undefined,
-    cwd: r.cwd ?? undefined,
-    pinned: r.pinned === 1,
-    hasUnread: r.has_unread === 1,
-    lastActivityAt: r.last_activity_at,
-    createdAt: r.created_at,
-    updatedAt: r.updated_at,
-    selectedLlmIndex: r.llm_index ?? undefined,
-    selectedLlmDisplayName: r.llm_display_name ?? undefined,
-  };
-}
-
-function projectFromRow(r: ProjectRow): Project {
-  return {
-    id: r.id,
-    name: r.name,
-    rootPath: r.root_path ?? undefined,
-    icon: r.icon ?? undefined,
-    color: r.color ?? undefined,
-    pinned: r.pinned === 1,
-    lastActivityAt: r.last_activity_at,
-    createdAt: r.created_at,
-    updatedAt: r.updated_at,
-  };
-}
+// Session + project row mappers moved to sessionsStore in M4b
+// (sessionFromBrief / projectFromBrief — both translate the Rust
+// SessionBrief / ProjectBrief wire shape instead of mapping raw SQLite
+// rows now that writes don't touch this file).
 
 // ---------------- messages ----------------
 //

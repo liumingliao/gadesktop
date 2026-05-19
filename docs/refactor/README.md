@@ -30,17 +30,20 @@ docs/refactor/
 ## 当前 cursor
 
 ```
-Phase:    Prototype ✅ → B1 ✅ → B2 ✅ → [B3 M1 ✅ M2 ✅ M3 ✅ M4a ✅] → M4b → v0.5
-                                                            ↑ 现在在这里
-Status:   B3 M4a COMPLETE — 16 GalleyApi trait method (12 session +
-          4 project) + 47 cargo test 全过 (76 → 123 total) + 16 Tauri
-          command registered + agent-api.md §8A 增量。**Frontend 完全
-          不动，行为 byte-identical** — Tauri 命令 dormant 等 M4b 接 caller。
-Next:     B3 M4b T4b.1 — 新建 gui/src/stores/sessions.ts skeleton +
-          22 call site swap + 删 lib/db.ts 中 sessions/projects 写路径。
-          需 fresh session 重开（per N5 教训，M4 估总 ~2150 LOC 不能
-          单 session 推完）。
-Blocker:  无
+Phase:    Prototype ✅ → B1 ✅ → B2 ✅ → [B3 M1 ✅ M2 ✅ M3 ✅ M4 ✅] → M5 → v0.5
+                                                          ↑ 现在在这里
+Status:   B3 M4 COMPLETE — sessionsStore extracted; useAppStore.ts
+          2362 → 1431 行 (-931 LOC). frontend write path 100% 走 Rust
+          GalleyApi. lib/db.ts: 883 → 607 (-276). Rust 126 tests +
+          TS typecheck + lint + cargo check 全 clean. Cross-store
+          coordination via dynamic import + applyDerivedFromRuntime
+          pattern. M5 启动门: M4b dogfood 1 day + M5 sub-plan.
+Next:     B3 M5 T5.1 — messagesStore extraction (per-session conversation
+          turns, pending approvals, ask_user, in-flight streaming).
+          最复杂 slice — 启动前必读 [M5 sub-plan](TBD) + G11 子文件拆分预案
+          (sessions.ts 已超 600 行，M5 同步分 messages/ subfolder).
+Blocker:  M4b dogfood 1 day (B3-I1) — JC 验证 bulk / project / LLM /
+          unread / rename / pin / activate 行为不退化。
 ```
 
 **Cursor 更新协议**：每个 sub-task 完成 → 当前 phase playbook 顶部的 cursor 行更新 → 本文件总 cursor 表跟着更新（只 phase 级别）。**不要批量更新**——每 task 一更，防止 session 中断后丢状态。
@@ -52,7 +55,7 @@ Blocker:  无
 | Prototype: Rust-owned subprocess | ✅ COMPLETE · 17/17 · GO | — | [bridge-owner/README.md](../../core/experiments/bridge-owner/README.md) | 2026-05-18 session 1: all 5 subsections in one sprint |
 | B1: Rust core 骨架 + CLI 只读 | ✅ COMPLETE · M1-M7 · 11/12 A acceptance | — | [B1-rust-core.md](./B1-rust-core.md) · [devlog](../devlog/2026-05-18-b1-rust-core-complete.md) | 2026-05-18 single session — 21× faster than 3-week estimate |
 | B2: Bridge ownership 迁 Rust | ✅ COMPLETE · M1-M7 · 83 tests pass · tag `b2-complete` | — | [B2-bridge-ownership.md](./B2-bridge-ownership.md) · [devlog](../devlog/2026-05-19-b2-bridge-ownership-complete.md) | 2026-05-19 single session — full pipeline + docs + tag. Dogfood validation moved to B3 M2 启动门 ([prereq relaxation devlog](../devlog/2026-05-19-b3-prereq-relaxation.md)) |
-| B3: useAppStore 拆 slice + 改订阅 | 🟡 M1 ✅ + M2 ✅ + M3 ✅ + M4a ✅ | T4b.1 (M4b 前端 sessionsStore — fresh session) | [B3-store-slice.md](./B3-store-slice.md) · M1 [devlog](../devlog/2026-05-19-b3-m1-design-complete.md) · M3 [devlog](../devlog/2026-05-19-b3-m3-complete.md) · 3 M1 design artifact [mapping](./b3-slice-mapping.md)/[ADR](./b3-slice-adr.md)/[emit catalogue](./b3-rust-emit-catalogue.md) · [M3 sub-plan](./B3-M3-sub-plan.md) · [M4 sub-plan](./B3-M4-sub-plan.md) | 2026-05-19 third session: M4 sub-plan + M4a Rust trait shipped (16 methods, 47 new tests, agent-api §8A). Frontend untouched — behavior byte-identical. M4b 前端抽离待 fresh session. |
+| B3: useAppStore 拆 slice + 改订阅 | 🟡 M1 ✅ + M2 ✅ + M3 ✅ + M4 ✅ | T5.1 (M5 messagesStore) | [B3-store-slice.md](./B3-store-slice.md) · M1 [devlog](../devlog/2026-05-19-b3-m1-design-complete.md) · M3 [devlog](../devlog/2026-05-19-b3-m3-complete.md) · 3 M1 design artifact [mapping](./b3-slice-mapping.md)/[ADR](./b3-slice-adr.md)/[emit catalogue](./b3-rust-emit-catalogue.md) · [M3 sub-plan](./B3-M3-sub-plan.md) · [M4 sub-plan](./B3-M4-sub-plan.md) | 2026-05-19 third session: M4 完成全部 — sub-plan + M4a Rust trait + addendum + M4b frontend sessionsStore extraction. useAppStore -931 LOC; lib/db.ts -276 LOC. M5 messagesStore 待 fresh session. |
 | B4: CLI feature-complete + background + artifact | ⏳ 未启动 | — | [B4-cli-bg-artifact.md](./B4-cli-bg-artifact.md) (stub) | 2026-05-15 stub |
 | **v0.5 milestone** | ⏳ | — | — | — |
 

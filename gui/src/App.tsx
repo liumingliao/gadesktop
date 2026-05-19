@@ -27,6 +27,7 @@ import {
   makeDemoToast,
 } from "@/stores/demo";
 import { useRuntimeStore } from "@/stores/runtime";
+import { useSessionsStore } from "@/stores/sessions";
 import { useUiStore, type Screen } from "@/stores/ui";
 import { useAppStore } from "@/stores/useAppStore";
 
@@ -62,32 +63,41 @@ function App() {
   // those fields actually change. So a plain selector with default
   // strict-equality stays stable through frequent non-sidebar
   // updates like turn_progress streaming.
-  const sessions = useAppStore((s) => s.sessions);
-  const activeSessionId = useAppStore((s) => s.activeSessionId);
-  const createSession = useAppStore((s) => s.createSession);
+  const sessions = useSessionsStore((s) => s.sessions);
+  const activeSessionId = useSessionsStore((s) => s.activeSessionId);
+  const createSession = useSessionsStore((s) => s.createSession);
+  // activateSession is the orchestrator and still lives in useAppStore
+  // (composes setActive + restoreTurns + spawnBridge). Other CRUD
+  // actions are slice-native now.
   const activateSession = useAppStore((s) => s.activateSession);
-  const setActiveSession = useAppStore((s) => s.setActiveSession);
-  const archiveSession = useAppStore((s) => s.archiveSession);
-  const unarchiveSession = useAppStore((s) => s.unarchiveSession);
-  const togglePinSession = useAppStore((s) => s.togglePinSession);
-  const renameSession = useAppStore((s) => s.renameSession);
-  const projects = useAppStore((s) => s.projects);
-  const activeProjectFilter = useAppStore((s) => s.activeProjectFilter);
-  const createProject = useAppStore((s) => s.createProject);
-  const setActiveProjectFilter = useAppStore((s) => s.setActiveProjectFilter);
-  const assignSessionToProject = useAppStore((s) => s.assignSessionToProject);
-  const updateProject = useAppStore((s) => s.updateProject);
-  const deleteProject = useAppStore((s) => s.deleteProject);
-  const archiveSessionsBulk = useAppStore((s) => s.archiveSessionsBulk);
-  const unarchiveSessionsBulk = useAppStore((s) => s.unarchiveSessionsBulk);
-  const deleteSessionsPermanentlyBulk = useAppStore(
+  const setActiveSession = useSessionsStore((s) => s.setActiveSession);
+  const archiveSession = useSessionsStore((s) => s.archiveSession);
+  const unarchiveSession = useSessionsStore((s) => s.unarchiveSession);
+  const togglePinSession = useSessionsStore((s) => s.togglePinSession);
+  const renameSession = useSessionsStore((s) => s.renameSession);
+  const projects = useSessionsStore((s) => s.projects);
+  const activeProjectFilter = useSessionsStore((s) => s.activeProjectFilter);
+  const createProject = useSessionsStore((s) => s.createProject);
+  const setActiveProjectFilter = useSessionsStore(
+    (s) => s.setActiveProjectFilter,
+  );
+  const assignSessionToProject = useSessionsStore(
+    (s) => s.assignSessionToProject,
+  );
+  const updateProject = useSessionsStore((s) => s.updateProject);
+  const deleteProject = useSessionsStore((s) => s.deleteProject);
+  const archiveSessionsBulk = useSessionsStore((s) => s.archiveSessionsBulk);
+  const unarchiveSessionsBulk = useSessionsStore(
+    (s) => s.unarchiveSessionsBulk,
+  );
+  const deleteSessionsPermanentlyBulk = useSessionsStore(
     (s) => s.deleteSessionsPermanentlyBulk,
   );
   const seedMockSessions = useAppStore((s) => s.seedMockSessions);
-  const deleteSessionPermanently = useAppStore(
+  const deleteSessionPermanently = useSessionsStore(
     (s) => s.deleteSessionPermanently,
   );
-  const emptyArchive = useAppStore((s) => s.emptyArchive);
+  const emptyArchive = useSessionsStore((s) => s.emptyArchive);
   const appendUserTurnExternal = useAppStore((s) => s.appendUserTurnExternal);
   // LLM / runtimeInfo / pet state now live in runtimeStore (M3a).
   // Subscribe to the active session's per-runtime entry so the

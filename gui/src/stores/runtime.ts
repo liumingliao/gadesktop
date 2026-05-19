@@ -6,12 +6,13 @@ import {
   type BridgeClient,
   type BridgeSpawnArgs,
 } from "@/lib/bridge";
-import { persistSession, setPref } from "@/lib/db";
+import { setPref } from "@/lib/db";
 import {
   DEMO_LLM_DISPLAY_NAME,
   DEMO_LLMS,
   DEMO_RUNTIME_INFO,
 } from "@/stores/demo";
+import { useSessionsStore } from "@/stores/sessions";
 import { useUiStore } from "@/stores/ui";
 // useAppStore is imported for getState-time access (cross-store
 // transitional reads). The import is a circular dependency at the
@@ -240,7 +241,7 @@ async function _enforceLRUCap(): Promise<void> {
     // useAppStore._runtimes[id].agentRunning. After M5, switch to
     // `useMessagesStore.getState().byId[id]?.agentRunning`.
     const appState = useAppStore.getState();
-    const activeId = appState.activeSessionId;
+    const activeId = useSessionsStore.getState().activeSessionId;
     const victim = _lruOrder.find(
       (id) => id !== activeId && !appState._runtimes[id]?.agentRunning,
     );
@@ -671,13 +672,14 @@ export const useRuntimeStore = create<RuntimeStore>((set, get) => ({
  * Stable identity — Zustand returns the same reference until the
  * underlying byId map's keyed value changes.
  *
- * NOTE: this function reaches into useAppStore for `activeSessionId`.
- * That's a transitional cross-store dependency that M4 (sessionsStore)
- * will remove — components migrate to `useSessionsStore(s =>
- * s.activeSessionId)` then.
+ * Reads `activeSessionId` from sessionsStore (M4b owner). Components
+ * preferring slice subscribers should use
+ * `useSessionsStore(s => s.activeSessionId)` + an explicit
+ * `useRuntimeStore(...)` selector rather than calling this helper —
+ * it's a getState-time read meant for non-render code paths.
  */
 export function getActiveRuntime(): PerSessionRuntime | undefined {
-  const activeId = useAppStore.getState().activeSessionId;
+  const activeId = useSessionsStore.getState().activeSessionId;
   if (!activeId) return undefined;
   return useRuntimeStore.getState().byId[activeId];
 }
@@ -696,29 +698,11 @@ function readGAConfigFromAppStore() {
 }
 
 async function mirrorSelectedLLMOnSession(sid: string, current: LLMOption) {
-  // TRANSITIONAL (M4 sessionsStore): when sessions move to sessionsStore,
-  // switch to `useSessionsStore.getState().patchSession(sid, { ... })`.
-  let snap: { id: string } | null = null;
-  useAppStore.setState((state) => {
-    const idx = state.sessions.findIndex((s) => s.id === sid);
-    if (idx === -1) return {};
-    const session = state.sessions[idx];
-    if (
-      session.selectedLlmIndex === current.index &&
-      session.selectedLlmDisplayName === current.displayName
-    ) {
-      return {};
-    }
-    const next = state.sessions.slice();
-    next[idx] = {
-      ...session,
-      selectedLlmIndex: current.index,
-      selectedLlmDisplayName: current.displayName,
-    };
-    snap = next[idx];
-    return { sessions: next };
-  });
-  if (snap) {
-    await persistSession(snap);
-  }
+  // M4b: route through sessionsStore.setSessionLlm which invokes the
+  // Rust `set_session_llm` trait method. The store action mutates the
+  // in-memory row + fires the invoke; we don't have to round-trip a
+  // separate persistSession call.
+  await useSessionsStore
+    .getState()
+    .setSessionLlm(sid, current.index, current.displayName);
 }

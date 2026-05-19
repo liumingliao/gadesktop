@@ -13,6 +13,7 @@ import type {
 } from "@/types/ipc";
 
 import { useRuntimeStore } from "@/stores/runtime";
+import { useSessionsStore } from "@/stores/sessions";
 import { useUiStore } from "@/stores/ui";
 import type { useAppStore } from "@/stores/useAppStore";
 
@@ -101,7 +102,7 @@ export function dispatchIPCEvent(
       // SQLite query result so we skip the round-trip for newly
       // created sessions (the common case). For the cold-start case
       // turnCount comes from `loadSessions` during hydrate.
-      const session = store
+      const session = useSessionsStore
         .getState()
         .sessions.find((x) => x.id === event.sessionId);
       if (session && (session.turnCount ?? 0) > 0) {
@@ -183,7 +184,9 @@ export function dispatchIPCEvent(
       // the per-message step (matches what the user sees in the
       // main view). turn_count itself keeps incrementing in
       // absolute terms — that's the offset's source of truth.
-      s.bumpSessionAfterTurn(event.sessionId, event.summary, event.turnIndex);
+      useSessionsStore
+        .getState()
+        .bumpSessionAfterTurn(event.sessionId, event.summary, event.turnIndex);
       // SQLite: persist under the ABSOLUTE turn index. rowsToTurns
       // reconstructs the per-message step at restore by tracking
       // the latest user row's turn_index as a per-message base.
