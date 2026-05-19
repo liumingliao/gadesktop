@@ -1451,11 +1451,20 @@ export const useAppStore = create<AppStore>((set, get) => ({
       if (pendingLLMIndex !== undefined) {
         set({ pendingLLMIndex: undefined });
       }
+      // Restore the persisted LLM choice on respawn of an existing
+      // session. Without this `set_llm` is in-memory only — bridge
+      // exits, mykey.py default takes over on next spawn. Pending
+      // pick (Empty State LLM picker) wins when present because the
+      // user just made a fresh choice that hasn't reached SQLite yet.
+      const restoredLlmIndex =
+        !consumePending && !isFreshSession
+          ? session?.selectedLlmIndex
+          : undefined;
       await get().spawnBridge({
         ...get().gaConfig,
         sessionId: id,
         cwd: undefined,
-        llmIndex: consumePending ? pendingLLMIndex : undefined,
+        llmIndex: consumePending ? pendingLLMIndex : restoredLlmIndex,
       });
     } else {
       // Already alive — mark as most-recently-used so the LRU
@@ -2003,16 +2012,41 @@ export const useAppStore = create<AppStore>((set, get) => ({
 
   // ---- LLMs ----
   replaceLLMs: (sessionId, llms) => {
+    let sessionSnap: Session | null = null;
     set((state) => {
       // displayName follows isCurrent. If for some reason no entry
       // is flagged current, keep the previous displayName to avoid
       // a flash of empty string in the Composer.
       const current = llms.find((l) => l.isCurrent);
-      return applyRuntimeUpdate(state, sessionId, (rt) => ({
+      const update = applyRuntimeUpdate(state, sessionId, (rt) => ({
         ...rt,
         llms,
         llmDisplayName: current?.displayName ?? rt.llmDisplayName,
       }));
+      // Mirror the current selection onto the session row so it
+      // round-trips through SQLite and survives app restart. Without
+      // this, `agent.set_llm` is in-memory only — the next bridge
+      // respawn reads mykey.py's `is_default=True` entry and loses
+      // the user's choice.
+      const baseSessions = update.sessions ?? state.sessions;
+      const idx = baseSessions.findIndex((s) => s.id === sessionId);
+      if (idx !== -1 && current) {
+        const session = baseSessions[idx];
+        if (
+          session.selectedLlmIndex !== current.index ||
+          session.selectedLlmDisplayName !== current.displayName
+        ) {
+          const next = baseSessions.slice();
+          next[idx] = {
+            ...session,
+            selectedLlmIndex: current.index,
+            selectedLlmDisplayName: current.displayName,
+          };
+          update.sessions = next;
+          sessionSnap = next[idx];
+        }
+      }
+      return update;
     });
     // Cache LLM list to prefs so future cold-starts (before any
     // bridge has spawned) can show the real model names instead
@@ -2022,6 +2056,13 @@ export const useAppStore = create<AppStore>((set, get) => ({
     void setPref("llm_list", llms).catch((e) => {
       console.debug("[store] replaceLLMs llm_list cache failed.", e);
     });
+    // Persist the session row when the selected LLM actually changed.
+    // Best-effort: SQLite errors don't block the in-memory update.
+    if (sessionSnap) {
+      void persistSession(sessionSnap).catch((e) => {
+        console.debug("[store] replaceLLMs persistSession failed.", e);
+      });
+    }
   },
 
   selectLLMForNewSession: (index) => {

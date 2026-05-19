@@ -72,6 +72,8 @@ interface SessionBriefWire {
   updatedAt: string;
   pinned?: boolean;
   hasUnread?: boolean;
+  selectedLlmIndex?: number;
+  selectedLlmDisplayName?: string;
 }
 
 /**
@@ -129,6 +131,8 @@ function sessionFromBrief(b: SessionBriefWire): Session {
     lastActivityAt: b.lastActivityAt,
     createdAt: b.createdAt,
     updatedAt: b.updatedAt,
+    selectedLlmIndex: b.selectedLlmIndex,
+    selectedLlmDisplayName: b.selectedLlmDisplayName,
   };
 }
 
@@ -218,8 +222,8 @@ export async function persistSession(s: Session): Promise<void> {
       s.pid ?? null,
       s.cwd ?? null,
       s.pinned ? 1 : 0,
-      null, // llm_index — wired in #10
-      null, // llm_display_name — wired in #10
+      s.selectedLlmIndex ?? null,
+      s.selectedLlmDisplayName ?? null,
       s.hasUnread ? 1 : 0,
       s.lastActivityAt,
       s.createdAt,
@@ -358,6 +362,8 @@ function sessionFromRow(r: SessionRow): Session {
     lastActivityAt: r.last_activity_at,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
+    selectedLlmIndex: r.llm_index ?? undefined,
+    selectedLlmDisplayName: r.llm_display_name ?? undefined,
   };
 }
 

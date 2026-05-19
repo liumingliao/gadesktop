@@ -59,6 +59,16 @@ pub struct SessionBrief {
     /// New activity arrived while this session wasn't the active one.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub has_unread: Option<bool>,
+    /// Last LLM the user picked for this session (`agent.set_llm` index).
+    /// Restored at bridge respawn so the user's choice survives app
+    /// restart instead of reverting to the GA default in mykey.py.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub selected_llm_index: Option<u32>,
+    /// Display name of the persisted LLM. Cached alongside the index so
+    /// the sidebar can label the pill before the bridge ready event
+    /// re-confirms with the live `availableLLMs` list.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub selected_llm_display_name: Option<String>,
 }
 
 /// Filter / scope for `list_sessions`. All fields optional — None means

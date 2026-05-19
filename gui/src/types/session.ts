@@ -89,6 +89,23 @@ export interface Session {
   cwd?: string;
 
   pinned?: boolean;
+
+  /**
+   * Last LLM the user picked for this session (zero-based index into
+   * GA's `agent.list_llms()`). Written on every `replaceLLMs` (bridge
+   * `ready` event with the GA-default LLM marked current, or
+   * `llm_changed` after a successful `set_llm`). Read at activation
+   * time to seed the next bridge respawn with the same LLM —
+   * otherwise GA resets to mykey.py's `is_default=True` entry and the
+   * user's choice is lost on app restart.
+   */
+  selectedLlmIndex?: number;
+  /**
+   * Display-name companion to {@link selectedLlmIndex}. Lets the
+   * sidebar pill render the persisted label before the freshly
+   * spawned bridge re-confirms with `ready`.
+   */
+  selectedLlmDisplayName?: string;
 }
 
 export interface Project {

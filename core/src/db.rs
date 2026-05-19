@@ -121,6 +121,8 @@ struct SessionRow {
     last_activity_at: String,
     created_at: String,
     updated_at: String,
+    llm_index: Option<i64>,
+    llm_display_name: Option<String>,
 }
 
 impl SessionRow {
@@ -137,6 +139,10 @@ impl SessionRow {
             updated_at: self.updated_at,
             pinned: Some(self.pinned != 0),
             has_unread: Some(self.has_unread != 0),
+            selected_llm_index: self.llm_index.and_then(|n| {
+                if n < 0 { None } else { Some(n as u32) }
+            }),
+            selected_llm_display_name: self.llm_display_name,
         })
     }
 }
@@ -251,7 +257,8 @@ fn map_sqlx_err(e: sqlx::Error) -> GalleyError {
 // ---------------- trait impl ----------------
 
 const SESSIONS_SELECT_COLS: &str = "id, project_id, title, status, summary, turn_count, \
-    pinned, has_unread, last_activity_at, created_at, updated_at";
+    pinned, has_unread, last_activity_at, created_at, updated_at, \
+    llm_index, llm_display_name";
 
 #[async_trait]
 impl GalleyApi for SqliteGalley {
