@@ -30,15 +30,18 @@ docs/refactor/
 ## 当前 cursor
 
 ```
-Phase:    Prototype ✅ → B1 ✅ → [B2] → B3 → B4 → v0.5
-                                  ↑ 现在在这里
-Status:   B2 M1-M6 COMPLETE — full pipeline + public contract documented:
-          Rust RunnerManager + Tauri commands + Unix socket / named pipe +
-          CLI session send/watch + origin schema migrations 006/007 +
-          agent-api.md §2A Transports / §5.5a-b commands / §6A Origin type
-          Tests: 45 lib + 9 + 7 + 8 + 13 = 82 total pass
-Next:     B2 M7 T7.1 — acceptance + JC dogfood + perf gate + devlog + tag
-Blocker:  T2.10 / T3.13 / T4.10 / T4.11 manual dogfood — bundled into M7
+Phase:    Prototype ✅ → B1 ✅ → B2 ✅ → [B3] → B4 → v0.5
+                                          ↑ 现在在这里
+Status:   B2 COMPLETE — M1-M7 code + docs shipped (tag b2-complete)
+          dogfood 1-week stability period deferred to next session (per JC)
+          Acceptance A1/A2/A3/A5/A7/A10/A12 auto-verified (83 tests pass);
+          A4/A6/A8/A9/A11 + perf gate require dogfood — left as B3 prereq
+          Final code state: full read+write pipeline through Rust;
+          GUI byte-identical UX; CLI socket transport live; origin tracking on DB
+Next:     B3 M1 T1.1 — slice boundary static analysis + Rust emit event catalogue
+          (B3 playbook upgraded same session, cursor at T1.1)
+Blocker:  无 (B3 implementation gated on B2 dogfood 1-week stability — per
+          B3 prerequisites in B3-store-slice.md, not a B2 blocker)
 ```
 
 **Cursor 更新协议**：每个 sub-task 完成 → 当前 phase playbook 顶部的 cursor 行更新 → 本文件总 cursor 表跟着更新（只 phase 级别）。**不要批量更新**——每 task 一更，防止 session 中断后丢状态。
@@ -49,7 +52,7 @@ Blocker:  T2.10 / T3.13 / T4.10 / T4.11 manual dogfood — bundled into M7
 |---|---|---|---|---|
 | Prototype: Rust-owned subprocess | ✅ COMPLETE · 17/17 · GO | — | [bridge-owner/README.md](../../core/experiments/bridge-owner/README.md) | 2026-05-18 session 1: all 5 subsections in one sprint |
 | B1: Rust core 骨架 + CLI 只读 | ✅ COMPLETE · M1-M7 · 11/12 A acceptance | — | [B1-rust-core.md](./B1-rust-core.md) · [devlog](../devlog/2026-05-18-b1-rust-core-complete.md) | 2026-05-18 single session — 21× faster than 3-week estimate |
-| B2: Bridge ownership 迁 Rust | 🚧 M1-M6 done · M7 pending | T7.1 | [B2-bridge-ownership.md](./B2-bridge-ownership.md) | 2026-05-19 same session: M1-M6 ship — full pipeline + agent-api.md public contract documented. 82 tests pass. M7 bundles all 4 manual dogfood scenarios |
+| B2: Bridge ownership 迁 Rust | ✅ COMPLETE · M1-M7 · 83 tests pass · tag `b2-complete` | — | [B2-bridge-ownership.md](./B2-bridge-ownership.md) · [devlog](../devlog/2026-05-19-b2-bridge-ownership-complete.md) | 2026-05-19 single session — full pipeline + docs + tag. Dogfood 1-week period deferred to next session (B3 prerequisite) |
 | B3: useAppStore 拆 slice + 改订阅 | ⏳ 待启动（playbook ready） | T1.1 | [B3-store-slice.md](./B3-store-slice.md) | 2026-05-19 升格到完整 playbook (M1-M7, ~60 sub-tasks, 7 phase invariants, 12 gotchas) |
 | B4: CLI feature-complete + background + artifact | ⏳ 未启动 | — | [B4-cli-bg-artifact.md](./B4-cli-bg-artifact.md) (stub) | 2026-05-15 stub |
 | **v0.5 milestone** | ⏳ | — | — | — |
