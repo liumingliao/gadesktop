@@ -3,19 +3,14 @@ use serde::{Deserialize, Serialize};
 use super::{message::MessageId, session::SessionId};
 
 /// Where the search should look.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum SearchScope {
     /// All messages, archived sessions included.
     All,
     /// Messages from non-archived sessions only.
+    #[default]
     Active,
-}
-
-impl Default for SearchScope {
-    fn default() -> Self {
-        SearchScope::Active
-    }
 }
 
 /// One match in the FTS5 trigram index.
