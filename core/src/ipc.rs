@@ -373,11 +373,16 @@ pub struct SetLlmCommand {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AttachPetCommand {
-    /// Pet variant identifier. Reserved field — currently ignored by the
-    /// runner but kept on the wire for forward-compat with PRD §11 pet
-    /// variants. v0.1 runner accepts any value.
-    #[serde(default)]
-    pub variant: Option<String>,
+    /// Local HTTP port the Desktop Pet subprocess binds to. Default
+    /// 41983 (matches GA's `stapp.py`). Python `runner/ipc.py`
+    /// `AttachPetCommand` declares `port: int = 41983`, so this field
+    /// must round-trip end-to-end: TS → Rust → Python. We use
+    /// `skip_serializing_if = Option::is_none` so omitting it from the
+    /// wire (when the TS caller doesn't specify) lets Python fall back
+    /// to its own default — sending `null` would error against Python's
+    /// strict-int dataclass.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub port: Option<u16>,
 }
 
 #[cfg(test)]
@@ -496,5 +501,46 @@ mod tests {
     #[test]
     fn protocol_version_constant() {
         assert_eq!(PROTOCOL_VERSION, "0.1");
+    }
+
+    /// Regression guard: the Rust↔Python `AttachPetCommand` schemas
+    /// must stay aligned. Python `runner/ipc.py` declares
+    /// `AttachPetCommand(port: int = 41983, kind: str = "attach_pet")`
+    /// and decodes via `cls(**payload)` — *strict* kwargs that error
+    /// on any unknown field. The original B2 mirror added a
+    /// speculative `variant` field on the Rust side; TS sent
+    /// `{kind, port: 41983}`, Rust dropped `port` and re-serialized
+    /// with `{kind, variant: null}`, Python raised
+    /// `AttachPetCommand.__init__() got an unexpected keyword argument
+    /// 'variant'`. Caught 2026-05-19 in JC's dogfood. Two invariants
+    /// guard against the same class of drift:
+    ///   1. The wire field is `port`, not `variant`
+    ///   2. When `port` is None, it's omitted (not serialized as
+    ///      `null`) so Python's int-typed default kicks in
+    #[test]
+    fn attach_pet_wire_uses_port_not_variant() {
+        let with_port = IpcCommand::AttachPet(AttachPetCommand {
+            port: Some(41983),
+        });
+        let s = serde_json::to_string(&with_port).unwrap();
+        assert!(s.contains("\"kind\":\"attach_pet\""), "{s}");
+        assert!(s.contains("\"port\":41983"), "{s}");
+        assert!(!s.contains("variant"), "Rust must not emit 'variant': {s}");
+
+        // Omitted port → field skipped, Python falls back to its
+        // 41983 default. Critical: must NOT serialize as `"port":null`.
+        let no_port = IpcCommand::AttachPet(AttachPetCommand { port: None });
+        let s = serde_json::to_string(&no_port).unwrap();
+        assert_eq!(
+            s, r#"{"kind":"attach_pet"}"#,
+            "None port must be omitted (Python uses int default), not serialized as null"
+        );
+
+        // Round-trip: TS-style input parses + re-serializes
+        // identically.
+        let from_ts = r#"{"kind":"attach_pet","port":41983}"#;
+        let parsed: IpcCommand = serde_json::from_str(from_ts).unwrap();
+        let reserialized = serde_json::to_string(&parsed).unwrap();
+        assert_eq!(reserialized, from_ts);
     }
 }
