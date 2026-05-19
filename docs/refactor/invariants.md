@@ -49,10 +49,10 @@ v0.1 已用 migration 001-005。**v0.5 起从 006 开始递增，绝不跳号、
 | 号段 | 用途 |
 |---|---|
 | 001-005 | v0.1 已 ship · 不动 |
-| 006-009 | B1 阶段新增字段（`created_via` / `supervisor` / `origin_note`） |
-| 010-019 | B2 阶段（如有） |
-| 020-029 | B3 阶段（如有） |
-| 030+ | B4 阶段（如有） |
+| 006-007 | B2 M5 ship · `created_via` / `supervisor` / `origin_note` (messages + sessions) |
+| 008+ | 后续 B 阶段 / 未来 features，按 commit 顺序递增 |
+
+**号段-to-phase 不再强映射** — invariants §I3 的 hard rule 是"不跳号"，原表把 006-009 分给 B1 / 010-019 给 B2 是计划性 hint，但 B1 实际没引入新字段（B1-I1: B1 内不动 write path），所以 B2 自然接 006。后续 phase 同理：按真实 commit 顺序递增，不为"对齐 phase 边界"而跳号。
 
 **migration 写好后不准改**——dogfood 用户的 DB 已经跑过那个版本号了，改内容会让两侧 DB schema 漂移。要修 = 加新 migration 覆盖。
 

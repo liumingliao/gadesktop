@@ -51,12 +51,16 @@
 //! the residual narrow race window between try-connect and the next
 //! process's bind (~ms; OS-level atomic bind would close this fully).
 
-use crate::api::{GalleyApi, SessionFilter};
+use crate::api::{GalleyApi, Origin, OriginVia, SessionFilter, SessionId};
 use crate::db::SqliteGalley;
+use crate::ipc::{IpcCommand, UserMessageCommand};
+use crate::runner_manager::{BroadcastItem, RunnerManager};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::Duration;
+use tokio::sync::broadcast;
 
 #[cfg(unix)]
 use tokio::net::{UnixListener, UnixStream};
@@ -169,10 +173,14 @@ extern "C" {
 /// app's lifetime. Idempotent at startup boundary — if another Galley
 /// instance is already bound, logs + returns without crashing.
 ///
-/// `cleanup_on_drop`: a guard that unlinks the socket file when dropped
-/// (Unix only — Windows pipes auto-clean). Hold this in app state to keep
-/// the socket alive until process exit.
-pub async fn start() -> Result<SocketGuard, std::io::Error> {
+/// `manager`: shared reference to the RunnerManager. Cloned into the
+/// per-connection dispatch tasks so write commands (`session.send`,
+/// `session.watch`) can talk to subprocesses.
+///
+/// Returns a guard that unlinks the socket file when dropped (Unix only —
+/// Windows pipes auto-clean). Hold this in app state to keep the socket
+/// alive until process exit.
+pub async fn start(manager: Arc<RunnerManager>) -> Result<SocketGuard, std::io::Error> {
     let path = socket_path();
 
     // Race detection: try connecting to see if another instance owns it.
@@ -218,9 +226,10 @@ pub async fn start() -> Result<SocketGuard, std::io::Error> {
             apply_socket_permissions(&path);
 
             let task_path = path.clone();
+            let task_manager = manager.clone();
             tokio::spawn(async move {
                 eprintln!("[socket] listening on {}", task_path.display());
-                accept_loop(listener).await;
+                accept_loop(listener, task_manager).await;
             });
             Ok(SocketGuard::active(path))
         }
@@ -267,11 +276,15 @@ fn apply_socket_permissions(path: &PathBuf) {
 }
 
 #[cfg(unix)]
-async fn accept_loop(listener: UnixListener) {
+async fn accept_loop(listener: UnixListener, manager: Arc<RunnerManager>) {
     loop {
         match listener.accept().await {
             Ok((stream, _addr)) => {
-                tokio::spawn(handle_unix_connection(stream));
+                let m = manager.clone();
+                tokio::spawn(async move {
+                    let (read_half, write_half) = stream.into_split();
+                    handle_stream(read_half, write_half, m).await;
+                });
             }
             Err(e) => {
                 eprintln!("[socket] accept error: {e}");
@@ -283,7 +296,7 @@ async fn accept_loop(listener: UnixListener) {
 }
 
 #[cfg(windows)]
-async fn accept_loop(mut listener: NamedPipeServer) {
+async fn accept_loop(mut listener: NamedPipeServer, manager: Arc<RunnerManager>) {
     loop {
         // `connect()` blocks until a client connects to this pipe.
         if let Err(e) = listener.connect().await {
@@ -309,23 +322,15 @@ async fn accept_loop(mut listener: NamedPipeServer) {
             }
         };
         let connected = std::mem::replace(&mut listener, new_listener);
-        tokio::spawn(handle_windows_connection(connected));
+        let m = manager.clone();
+        tokio::spawn(async move {
+            let (read_half, write_half) = tokio::io::split(connected);
+            handle_stream(read_half, write_half, m).await;
+        });
     }
 }
 
-#[cfg(unix)]
-async fn handle_unix_connection(stream: UnixStream) {
-    let (read_half, write_half) = stream.into_split();
-    handle_stream(read_half, write_half).await;
-}
-
-#[cfg(windows)]
-async fn handle_windows_connection(stream: NamedPipeServer) {
-    let (read_half, write_half) = tokio::io::split(stream);
-    handle_stream(read_half, write_half).await;
-}
-
-async fn handle_stream<R, W>(read_half: R, mut write_half: W)
+async fn handle_stream<R, W>(read_half: R, mut write_half: W, manager: Arc<RunnerManager>)
 where
     R: tokio::io::AsyncRead + Unpin,
     W: tokio::io::AsyncWrite + Unpin,
@@ -350,11 +355,97 @@ where
         if line.trim().is_empty() {
             continue;
         }
-        let resp = dispatch_line(&line).await;
-        if write_resp(&mut write_half, &resp).await.is_err() {
-            return;
+        match dispatch_line(&line, &manager).await {
+            DispatchResult::Unary(resp) => {
+                if write_resp(&mut write_half, &resp).await.is_err() {
+                    return;
+                }
+            }
+            DispatchResult::Stream { request_id, mut rx } => {
+                // Long-running subscription: forward each broadcast item
+                // as a stream line until the receiver closes (subprocess
+                // exited) or the client disconnects.
+                use tokio::sync::broadcast::error::RecvError;
+                loop {
+                    match rx.recv().await {
+                        Ok(BroadcastItem::Event(boxed)) => {
+                            let payload = StreamEnvelope::event(request_id.clone(), serde_json::to_value(&*boxed).unwrap_or(Value::Null));
+                            if write_stream_line(&mut write_half, &payload).await.is_err() {
+                                return;
+                            }
+                        }
+                        Ok(BroadcastItem::Malformed(line)) => {
+                            let payload = StreamEnvelope::event(
+                                request_id.clone(),
+                                serde_json::json!({ "kind": "malformed", "line": line }),
+                            );
+                            if write_stream_line(&mut write_half, &payload).await.is_err() {
+                                return;
+                            }
+                        }
+                        Err(RecvError::Lagged(_)) => continue,
+                        Err(RecvError::Closed) => {
+                            let payload = StreamEnvelope::end(request_id.clone(), "subprocess_exited");
+                            let _ = write_stream_line(&mut write_half, &payload).await;
+                            return;
+                        }
+                    }
+                }
+            }
         }
     }
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct StreamEnvelope {
+    stream: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    request_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    data: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reason: Option<String>,
+}
+
+impl StreamEnvelope {
+    fn event(request_id: Option<String>, data: Value) -> Self {
+        Self {
+            stream: "event",
+            request_id,
+            data: Some(data),
+            reason: None,
+        }
+    }
+    fn end(request_id: Option<String>, reason: &str) -> Self {
+        Self {
+            stream: "end",
+            request_id,
+            data: None,
+            reason: Some(reason.to_string()),
+        }
+    }
+}
+
+async fn write_stream_line<W: tokio::io::AsyncWrite + Unpin>(
+    w: &mut W,
+    env: &StreamEnvelope,
+) -> std::io::Result<()> {
+    let line = serde_json::to_string(env).unwrap_or_default();
+    w.write_all(line.as_bytes()).await?;
+    w.write_all(b"\n").await?;
+    w.flush().await?;
+    Ok(())
+}
+
+/// Output of [`dispatch_line`]. Most commands return a single response
+/// (Unary); `session.watch` returns a Stream of broadcast events.
+enum DispatchResult {
+    Unary(SocketResponse),
+    Stream {
+        request_id: Option<String>,
+        rx: broadcast::Receiver<BroadcastItem>,
+    },
 }
 
 async fn write_resp<W: tokio::io::AsyncWrite + Unpin>(
@@ -370,51 +461,178 @@ async fn write_resp<W: tokio::io::AsyncWrite + Unpin>(
     Ok(())
 }
 
-/// Parse a request line and dispatch to a command handler. Always returns
-/// a [`SocketResponse`] — error variants get caught and surfaced through
-/// the same NDJSON envelope so the wire format stays uniform.
-async fn dispatch_line(line: &str) -> SocketResponse {
+/// Parse a request line and dispatch to a command handler. Returns either
+/// a single [`SocketResponse`] or a streaming broadcast receiver for
+/// subscription commands like `session.watch`.
+async fn dispatch_line(line: &str, manager: &RunnerManager) -> DispatchResult {
     let req: SocketRequest = match serde_json::from_str(line) {
         Ok(r) => r,
         Err(e) => {
-            return SocketResponse::err(
+            return DispatchResult::Unary(SocketResponse::err(
                 None,
                 "invalid_args",
                 format!("malformed request JSON: {e}"),
-            );
+            ));
         }
     };
     if req.schema_version != SCHEMA_VERSION {
-        return SocketResponse::err(
+        return DispatchResult::Unary(SocketResponse::err(
             req.request_id,
             "schema_mismatch",
             format!(
                 "client schema_version {} != server {}",
                 req.schema_version, SCHEMA_VERSION
             ),
-        );
+        ));
     }
 
     let request_id = req.request_id.clone();
     match req.command.as_str() {
-        // ---- B1 read commands wired for socket transport ----
-        "sessions.list" => dispatch_sessions_list(request_id, req.args).await,
-        "ping" => SocketResponse::ok(request_id, serde_json::json!({ "pong": true })),
-        "version" => SocketResponse::ok(
+        // ---- B1 read commands ----
+        "sessions.list" => DispatchResult::Unary(dispatch_sessions_list(request_id, req.args).await),
+        "ping" => DispatchResult::Unary(SocketResponse::ok(
+            request_id,
+            serde_json::json!({ "pong": true }),
+        )),
+        "version" => DispatchResult::Unary(SocketResponse::ok(
             request_id,
             serde_json::json!({ "schemaVersion": SCHEMA_VERSION }),
+        )),
+        // ---- B2 M4 write commands ----
+        "session.send" => DispatchResult::Unary(
+            dispatch_session_send(request_id, req.args, manager).await,
         ),
-        // ---- B2 M4 write commands (not implemented yet) ----
-        "session.send" | "session.watch" => SocketResponse::err(
-            request_id,
-            "not_implemented",
-            format!("'{}' lands in B2 M4", req.command),
-        ),
-        other => SocketResponse::err(
+        "session.watch" => dispatch_session_watch(request_id, req.args, manager).await,
+        other => DispatchResult::Unary(SocketResponse::err(
             request_id,
             "unknown_command",
             format!("no handler for '{other}'"),
-        ),
+        )),
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SessionSendArgs {
+    session_id: String,
+    content: String,
+    #[serde(default)]
+    supervisor: Option<String>,
+    #[serde(default)]
+    reason: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SessionWatchArgs {
+    session_id: String,
+}
+
+async fn dispatch_session_send(
+    request_id: Option<String>,
+    args: Value,
+    manager: &RunnerManager,
+) -> SocketResponse {
+    let parsed: SessionSendArgs = match serde_json::from_value(args) {
+        Ok(a) => a,
+        Err(e) => {
+            return SocketResponse::err(
+                request_id,
+                "invalid_args",
+                format!("session.send args: {e}"),
+            );
+        }
+    };
+    // 1. Open DB + write message row with origin = cli/supervisor
+    let galley = match SqliteGalley::open().await {
+        Ok(g) => g,
+        Err(e) => {
+            return SocketResponse::err(
+                request_id,
+                "db_unavailable",
+                format!("open: {e}"),
+            );
+        }
+    };
+    let origin = Origin {
+        via: if parsed.supervisor.is_some() {
+            OriginVia::Supervisor
+        } else {
+            OriginVia::Cli
+        },
+        supervisor: parsed.supervisor.clone(),
+        reason: parsed.reason.clone(),
+    };
+    let session_id = SessionId(parsed.session_id.clone());
+    let brief = match galley
+        .send_message(session_id, parsed.content.clone(), origin)
+        .await
+    {
+        Ok(b) => b,
+        Err(crate::error::GalleyError::NotFound { message }) => {
+            return SocketResponse::err(request_id, "not_found", message);
+        }
+        Err(crate::error::GalleyError::InvalidArgs { message }) => {
+            return SocketResponse::err(request_id, "invalid_args", message);
+        }
+        Err(e) => {
+            return SocketResponse::err(
+                request_id,
+                "internal",
+                format!("send_message: {e}"),
+            );
+        }
+    };
+
+    // 2. Best-effort dispatch to runner. If the session's runner isn't
+    // alive (LRU evicted, never spawned, crashed), the message is still
+    // persisted in the DB — caller can `galley session watch` and wait
+    // for a future spawn / replay path. We surface the runner result in
+    // the response so callers know whether the message reached the
+    // subprocess this turn.
+    let dispatch_status = match manager
+        .send_command(
+            &parsed.session_id,
+            &IpcCommand::UserMessage(UserMessageCommand {
+                text: parsed.content,
+                images: vec![],
+            }),
+        )
+        .await
+    {
+        Ok(()) => "dispatched",
+        Err(_) => "persisted_only",
+    };
+
+    let result = serde_json::json!({
+        "message": brief,
+        "dispatch": dispatch_status,
+    });
+    SocketResponse::ok(request_id, result)
+}
+
+async fn dispatch_session_watch(
+    request_id: Option<String>,
+    args: Value,
+    manager: &RunnerManager,
+) -> DispatchResult {
+    let parsed: SessionWatchArgs = match serde_json::from_value(args) {
+        Ok(a) => a,
+        Err(e) => {
+            return DispatchResult::Unary(SocketResponse::err(
+                request_id,
+                "invalid_args",
+                format!("session.watch args: {e}"),
+            ));
+        }
+    };
+    match manager.subscribe(&parsed.session_id).await {
+        Some(rx) => DispatchResult::Stream { request_id, rx },
+        None => DispatchResult::Unary(SocketResponse::err(
+            request_id,
+            "not_found",
+            format!("no live runner for session {}", parsed.session_id),
+        )),
     }
 }
 
@@ -577,42 +795,62 @@ mod tests {
         assert!(s.contains("\"message\":\"session does not exist\""));
     }
 
+    /// Helper: unwrap the Unary variant for tests that only exercise
+    /// non-stream commands. Streaming command tests live in the
+    /// `core/tests/socket_listener_test.rs` integration suite where
+    /// a real RunnerManager + spawned subprocess exists.
+    fn expect_unary(r: DispatchResult) -> SocketResponse {
+        match r {
+            DispatchResult::Unary(resp) => resp,
+            DispatchResult::Stream { .. } => panic!("expected Unary, got Stream"),
+        }
+    }
+
     #[tokio::test]
     async fn dispatch_unknown_command_yields_error() {
-        let resp = dispatch_line(r#"{"command":"nope.does_not_exist"}"#).await;
+        let mgr = RunnerManager::new();
+        let resp = expect_unary(
+            dispatch_line(r#"{"command":"nope.does_not_exist"}"#, &mgr).await,
+        );
         assert!(!resp.ok);
         assert_eq!(resp.error.as_deref(), Some("unknown_command"));
     }
 
     #[tokio::test]
     async fn dispatch_ping_succeeds() {
-        let resp = dispatch_line(r#"{"command":"ping","requestId":"r1"}"#).await;
+        let mgr = RunnerManager::new();
+        let resp = expect_unary(
+            dispatch_line(r#"{"command":"ping","requestId":"r1"}"#, &mgr).await,
+        );
         assert!(resp.ok);
         assert_eq!(resp.request_id.as_deref(), Some("r1"));
     }
 
     #[tokio::test]
     async fn dispatch_invalid_json() {
-        let resp = dispatch_line("not-json").await;
+        let mgr = RunnerManager::new();
+        let resp = expect_unary(dispatch_line("not-json", &mgr).await);
         assert!(!resp.ok);
         assert_eq!(resp.error.as_deref(), Some("invalid_args"));
     }
 
     #[tokio::test]
     async fn dispatch_schema_mismatch() {
-        let resp = dispatch_line(r#"{"command":"ping","schemaVersion":42}"#).await;
+        let mgr = RunnerManager::new();
+        let resp = expect_unary(
+            dispatch_line(r#"{"command":"ping","schemaVersion":42}"#, &mgr).await,
+        );
         assert!(!resp.ok);
         assert_eq!(resp.error.as_deref(), Some("schema_mismatch"));
     }
 
     #[tokio::test]
-    async fn dispatch_write_commands_not_implemented_yet() {
-        for cmd in ["session.send", "session.watch"] {
-            let line = format!(r#"{{"command":"{cmd}"}}"#);
-            let resp = dispatch_line(&line).await;
-            assert!(!resp.ok);
-            assert_eq!(resp.error.as_deref(), Some("not_implemented"));
-        }
+    async fn dispatch_session_watch_unknown_session_returns_not_found() {
+        let mgr = RunnerManager::new();
+        let line = r#"{"command":"session.watch","args":{"sessionId":"nope"}}"#;
+        let resp = expect_unary(dispatch_line(line, &mgr).await);
+        assert!(!resp.ok);
+        assert_eq!(resp.error.as_deref(), Some("not_found"));
     }
 
     #[test]

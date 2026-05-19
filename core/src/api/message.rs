@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 
+use super::origin::Origin;
 use super::session::SessionId;
 
 /// Opaque message identifier. The `messages.id` column is `TEXT` —
@@ -38,4 +39,9 @@ pub struct MessageBrief {
     /// the agent loop). Useful for grouping replies.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub turn_index: Option<u32>,
+    /// Where this message came from (B2 M5+). Optional on read APIs to
+    /// keep backward-compatible JSON shape; always present on
+    /// `send_message` responses.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub origin: Option<Origin>,
 }

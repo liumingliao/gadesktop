@@ -101,6 +101,18 @@ pub fn run() {
             sql: include_str!("../migrations/005_add_message_preamble.sql"),
             kind: MigrationKind::Up,
         },
+        Migration {
+            version: 6,
+            description: "add messages origin (created_via, supervisor, origin_note)",
+            sql: include_str!("../migrations/006_messages_origin.sql"),
+            kind: MigrationKind::Up,
+        },
+        Migration {
+            version: 7,
+            description: "add sessions origin (created_via, created_by_supervisor, created_origin_note)",
+            sql: include_str!("../migrations/007_sessions_origin.sql"),
+            kind: MigrationKind::Up,
+        },
     ];
 
     tauri::Builder::default()
@@ -114,12 +126,13 @@ pub fn run() {
                 .build(),
         )
         // RunnerManager is the single Rust authority for Python runner
-        // subprocesses (B2 M1). Held as Tauri app state so the
-        // `spawn_runner` / `send_to_runner` / etc. commands all reach the
-        // same instance. Window close + app quit must call
-        // `shutdown_all_runners` from JS — there isn't a clean hook here
-        // to await async cleanup before Tauri tears the runtime down.
-        .manage(runner_manager::RunnerManager::new())
+        // subprocesses (B2 M1). Held as Tauri app state inside an `Arc`
+        // so the `spawn_runner` / `send_to_runner` / etc. commands AND
+        // the socket_listener task all reach the same instance. Window
+        // close + app quit must call `shutdown_all_runners` from JS —
+        // there isn't a clean hook here to await async cleanup before
+        // Tauri tears the runtime down.
+        .manage(std::sync::Arc::new(runner_manager::RunnerManager::new()))
         .invoke_handler(tauri::generate_handler![
             path_exists,
             list_sessions,
@@ -143,7 +156,14 @@ pub fn run() {
             // teardown, unlinking the socket file on Unix.
             {
                 use tauri::Manager;
-                match tauri::async_runtime::block_on(socket_listener::start()) {
+                // Pull the shared RunnerManager out of state to hand to the
+                // socket listener — the listener's dispatch tasks need to
+                // call into the SAME manager that Tauri commands use.
+                let manager: std::sync::Arc<runner_manager::RunnerManager> = _app
+                    .state::<std::sync::Arc<runner_manager::RunnerManager>>()
+                    .inner()
+                    .clone();
+                match tauri::async_runtime::block_on(socket_listener::start(manager)) {
                     Ok(guard) => {
                         _app.manage(guard);
                     }

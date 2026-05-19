@@ -132,7 +132,7 @@ fn err_to_json<T: Serialize + std::fmt::Display>(e: T) -> String {
 #[tauri::command]
 pub async fn spawn_runner(
     args: SpawnRunnerArgs,
-    manager: State<'_, RunnerManager>,
+    manager: State<'_, std::sync::Arc<RunnerManager>>,
     app: AppHandle,
 ) -> Result<u32, String> {
     let active = args.active_session_id.clone();
@@ -163,7 +163,7 @@ pub async fn spawn_runner(
 pub async fn send_to_runner(
     session_id: String,
     command: IpcCommand,
-    manager: State<'_, RunnerManager>,
+    manager: State<'_, std::sync::Arc<RunnerManager>>,
 ) -> Result<(), String> {
     manager
         .send_command(&session_id, &command)
@@ -175,7 +175,7 @@ pub async fn send_to_runner(
 pub async fn shutdown_runner(
     session_id: String,
     timeout_ms: Option<u64>,
-    manager: State<'_, RunnerManager>,
+    manager: State<'_, std::sync::Arc<RunnerManager>>,
 ) -> Result<(), String> {
     let timeout = timeout_ms.map(Duration::from_millis);
     match manager.shutdown(&session_id, timeout).await {
@@ -192,7 +192,7 @@ pub async fn shutdown_runner(
 #[tauri::command]
 pub async fn kill_runner(
     session_id: String,
-    manager: State<'_, RunnerManager>,
+    manager: State<'_, std::sync::Arc<RunnerManager>>,
 ) -> Result<(), String> {
     // Kill is just shutdown with a near-zero timeout — the manager's
     // shutdown path already falls back to forced kill after the timeout.
@@ -213,13 +213,13 @@ pub async fn kill_runner(
 #[tauri::command]
 pub async fn runner_stderr_tail(
     session_id: String,
-    manager: State<'_, RunnerManager>,
+    manager: State<'_, std::sync::Arc<RunnerManager>>,
 ) -> Result<Vec<String>, ()> {
     Ok(manager.stderr_tail(&session_id).await.unwrap_or_default())
 }
 
 #[tauri::command]
-pub async fn shutdown_all_runners(manager: State<'_, RunnerManager>) -> Result<(), String> {
+pub async fn shutdown_all_runners(manager: State<'_, std::sync::Arc<RunnerManager>>) -> Result<(), String> {
     manager.shutdown_all(Duration::from_secs(5)).await;
     Ok(())
 }

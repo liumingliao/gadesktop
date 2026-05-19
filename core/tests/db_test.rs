@@ -18,12 +18,14 @@ const MIG_002: &str = include_str!("../migrations/002_add_has_unread.sql");
 const MIG_003: &str = include_str!("../migrations/003_add_message_summary.sql");
 const MIG_004: &str = include_str!("../migrations/004_add_messages_fts.sql");
 const MIG_005: &str = include_str!("../migrations/005_add_message_preamble.sql");
+const MIG_006: &str = include_str!("../migrations/006_messages_origin.sql");
+const MIG_007: &str = include_str!("../migrations/007_sessions_origin.sql");
 
 async fn fresh_pool() -> SqlitePool {
     let pool = SqlitePool::connect("sqlite::memory:")
         .await
         .expect("open in-memory sqlite");
-    for sql in [MIG_001, MIG_002, MIG_003, MIG_004, MIG_005] {
+    for sql in [MIG_001, MIG_002, MIG_003, MIG_004, MIG_005, MIG_006, MIG_007] {
         sqlx::raw_sql(sql)
             .execute(&pool)
             .await

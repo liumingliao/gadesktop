@@ -24,6 +24,8 @@ const MIG_002: &str = include_str!("../../core/migrations/002_add_has_unread.sql
 const MIG_003: &str = include_str!("../../core/migrations/003_add_message_summary.sql");
 const MIG_004: &str = include_str!("../../core/migrations/004_add_messages_fts.sql");
 const MIG_005: &str = include_str!("../../core/migrations/005_add_message_preamble.sql");
+const MIG_006: &str = include_str!("../../core/migrations/006_messages_origin.sql");
+const MIG_007: &str = include_str!("../../core/migrations/007_sessions_origin.sql");
 
 /// Build a temp .db file with all migrations applied + (optionally)
 /// seed rows. Returns the path; caller stashes it for the spawned
@@ -34,7 +36,9 @@ async fn seeded_db_at(path: &std::path::Path) -> SqlitePool {
         .filename(path)
         .create_if_missing(true);
     let pool = SqlitePool::connect_with(opts).await.expect("open db");
-    for sql in [MIG_001, MIG_002, MIG_003, MIG_004, MIG_005] {
+    for sql in [
+        MIG_001, MIG_002, MIG_003, MIG_004, MIG_005, MIG_006, MIG_007,
+    ] {
         sqlx::raw_sql(sql)
             .execute(&pool)
             .await
@@ -160,6 +164,71 @@ async fn status_returns_counts() {
     assert_eq!(code, Some(0));
     let s: serde_json::Value = serde_json::from_str(stdout.trim()).expect("json");
     assert_eq!(s["total"], 2);
+}
+
+// ---- B2 M4 write command tests ----
+
+/// `galley session send` with no Galley Core running maps to exit 4
+/// (DbUnavailable per CLI exit-code contract). Asserts the CLI gracefully
+/// reports the socket connect failure instead of panicking.
+#[tokio::test]
+async fn session_send_without_core_running_exits_4() {
+    let td = tempdir();
+    let db = td.path().join("test.db");
+    let pool = seeded_db_at(&db).await;
+    seed_session(&pool, "s1", "x", "idle", "2026-05-18T00:00:00Z").await;
+    drop(pool);
+
+    // No Galley Core process → socket file absent OR refused. Either
+    // way, session send should report exit 4. We pre-empt cross-test
+    // pollution by setting TMPDIR to the tempdir so any (impossible)
+    // existing socket in /tmp doesn't accidentally match.
+    let (stdout, code) = run_galley_with_tmpdir(
+        &db,
+        td.path(),
+        &["session", "send", "s1", "hello"],
+    );
+    assert_eq!(code, Some(4), "exit code: stdout = {stdout}");
+    let parsed: serde_json::Value = serde_json::from_str(stdout.trim()).expect("json");
+    assert_eq!(parsed["error"], "db_unavailable");
+}
+
+/// `galley session watch` same as above: no Core → exit 4.
+#[tokio::test]
+async fn session_watch_without_core_running_exits_4() {
+    let td = tempdir();
+    let db = td.path().join("test.db");
+    let pool = seeded_db_at(&db).await;
+    drop(pool);
+
+    let (stdout, code) = run_galley_with_tmpdir(
+        &db,
+        td.path(),
+        &["session", "watch", "s1"],
+    );
+    assert_eq!(code, Some(4), "exit code: stdout = {stdout}");
+}
+
+/// Variant of run_galley that also sets TMPDIR so the CLI's
+/// `socket_path()` helper resolves to a tempdir-relative socket — keeps
+/// these tests from accidentally picking up a real Galley Core socket
+/// on the dev machine.
+fn run_galley_with_tmpdir(
+    db: &std::path::Path,
+    tmp: &std::path::Path,
+    args: &[&str],
+) -> (String, Option<i32>) {
+    let bin = std::path::PathBuf::from(env!("CARGO_BIN_EXE_galley"));
+    let out = Command::new(&bin)
+        .args(args)
+        .env("GALLEY_DB_PATH", db)
+        .env("TMPDIR", tmp)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
+        .expect("spawn galley");
+    let stdout = String::from_utf8_lossy(&out.stdout).into_owned();
+    (stdout, out.status.code())
 }
 
 // RAII tempdir — drops the directory when the `TempDir` is dropped.

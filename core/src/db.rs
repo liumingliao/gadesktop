@@ -162,6 +162,13 @@ impl MessageRow {
             created_at: self.created_at,
             summary: self.summary,
             turn_index: Some(self.turn_index.max(0) as u32),
+            // Read APIs don't currently project origin onto MessageBrief
+            // — the column exists from migration 006 but the read path
+            // here was written before B2 M5 added the field. Returning
+            // None keeps the JSON shape backward-compatible. A follow-up
+            // can extend MessageRow + this projection if a consumer
+            // needs it (e.g. v0.5 supervisor activity log in the GUI).
+            origin: None,
         })
     }
 }
@@ -544,6 +551,131 @@ impl GalleyApi for SqliteGalley {
 
         Ok(HealthReport { checks })
     }
+
+    async fn send_message(
+        &self,
+        session_id: SessionId,
+        content: String,
+        origin: crate::api::Origin,
+    ) -> Result<MessageBrief> {
+        // Validate target session exists + isn't archived. Cheap up-front
+        // check — fails fast for malformed CLI calls, avoids a partial
+        // write where the message row exists but the runner never sees it.
+        let row: Option<(String, String)> = sqlx::query_as(
+            "SELECT id, status FROM sessions WHERE id = ?",
+        )
+        .bind(&session_id.0)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(map_sqlx_err)?;
+
+        let (_id, status) = row.ok_or_else(|| GalleyError::NotFound {
+            message: format!("session '{}' does not exist", session_id.0),
+        })?;
+        if status == "archived" {
+            return Err(GalleyError::InvalidArgs {
+                message: format!("session {} is archived", session_id.0),
+            });
+        }
+
+        // Next turn_index = max(messages.turn_index) + 1. Reads concurrent
+        // with another writer could pick the same turn_index — but SQLite's
+        // WAL + the messages PK (id) means only one writer wins. For B2
+        // M4 the only writers are GUI (one at a time via Composer) + CLI
+        // (one at a time per session); race window narrow.
+        let next_turn: i64 = sqlx::query_scalar(
+            "SELECT COALESCE(MAX(turn_index), -1) + 1 FROM messages WHERE session_id = ?",
+        )
+        .bind(&session_id.0)
+        .fetch_one(&self.pool)
+        .await
+        .map_err(map_sqlx_err)?;
+
+        // Server-assigned id + timestamp. Format matches the existing
+        // GUI convention (`msg_<random>` — see runner/workbench_bridge.py).
+        // Using a UUIDv4 here would be cleaner but introduces a new dep
+        // for ~36 chars of randomness; for now we use a timestamp +
+        // counter pseudo-id good enough to be unique within a session.
+        // Replace with uuid in B3 when we have the dep there anyway.
+        let now = chrono_now_iso();
+        let msg_id = format!("msg_{}_{}", now.replace([':', '-', '.', 'T', '+'], ""), next_turn);
+
+        sqlx::query(
+            "INSERT INTO messages \
+             (id, session_id, turn_index, sequence, role, content, created_at, \
+              created_via, supervisor, origin_note) \
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind(&msg_id)
+        .bind(&session_id.0)
+        .bind(next_turn)
+        .bind(0_i64)
+        .bind("user")
+        .bind(&content)
+        .bind(&now)
+        .bind(origin.via.as_sql())
+        .bind(&origin.supervisor)
+        .bind(&origin.reason)
+        .execute(&self.pool)
+        .await
+        .map_err(map_sqlx_err)?;
+
+        // Touch session.last_activity_at so the sidebar sort surfaces
+        // this session at the top.
+        sqlx::query(
+            "UPDATE sessions SET last_activity_at = ?, updated_at = ? WHERE id = ?",
+        )
+        .bind(&now)
+        .bind(&now)
+        .bind(&session_id.0)
+        .execute(&self.pool)
+        .await
+        .map_err(map_sqlx_err)?;
+
+        Ok(MessageBrief {
+            id: MessageId(msg_id),
+            session_id,
+            role: crate::api::message::MessageRole::User,
+            content,
+            created_at: now,
+            summary: None,
+            turn_index: Some(next_turn.max(0) as u32),
+            origin: Some(origin),
+        })
+    }
+}
+
+/// Best-effort ISO 8601 timestamp. We avoid the `chrono` dep (one extra
+/// crate + transitive deps for one format call) by using `std::time` +
+/// hand-rolled UTC offset = 0. This is fine because the wire format
+/// consumes any valid ISO 8601 with offset, and downstream sorting is
+/// lexicographic.
+fn chrono_now_iso() -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let dur = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default();
+    let total_secs = dur.as_secs() as i64;
+    let days = total_secs / 86_400;
+    let rem = total_secs % 86_400;
+    let hour = rem / 3600;
+    let min = (rem % 3600) / 60;
+    let sec = rem % 60;
+    // Civil-from-days algorithm (Howard Hinnant) for date components.
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = (z - era * 146_097) as u64;
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146_096) / 365;
+    let y = yoe as i64 + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = if m <= 2 { y + 1 } else { y };
+    format!(
+        "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}+00:00",
+        y, m, d, hour, min, sec
+    )
 }
 
 fn into_search_hit(r: SearchHitRow) -> SearchHit {

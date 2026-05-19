@@ -65,8 +65,19 @@ pub trait GalleyApi: Send + Sync {
     /// surfaces as [`HealthStatus::DeferredB4`].
     async fn health(&self) -> Result<HealthReport>;
 
-    // Write methods land in B2:
-    //   async fn send_message(&self, ...) -> Result<...>;
-    //   async fn create_session(&self, ...) -> Result<SessionBrief>;
-    //   async fn archive_session(&self, id: SessionId, origin: Origin) -> Result<()>;
+    /// Persist a user message into a session. Writes the row to the
+    /// `messages` table with the supplied [`Origin`] triple. Does NOT
+    /// dispatch to the runner subprocess — the socket transport layer
+    /// (or B3 Tauri command layer) wires `send_message` to
+    /// [`RunnerManager::send_command`](crate::runner_manager::RunnerManager::send_command)
+    /// after a successful persist.
+    ///
+    /// Returns the persisted [`MessageBrief`] with its server-assigned
+    /// id and timestamp.
+    async fn send_message(
+        &self,
+        session_id: SessionId,
+        content: String,
+        origin: Origin,
+    ) -> Result<MessageBrief>;
 }

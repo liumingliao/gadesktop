@@ -22,6 +22,7 @@ use galley_core_lib::api::{
 };
 use galley_core_lib::db::SqliteGalley;
 use galley_core_lib::error::GalleyError;
+use galley_core_lib::socket_listener::socket_path;
 
 const SCHEMA_VERSION: u32 = 1;
 
@@ -100,6 +101,32 @@ enum SessionCmd {
         /// transcript. Useful for agents catching up.
         #[arg(long)]
         tail: Option<usize>,
+    },
+    /// Send a user message into a session (B2 M4). Persists to the
+    /// `messages` table with the supplied origin triple + dispatches
+    /// to the live runner subprocess (if one is alive). Requires Galley
+    /// Core to be running (exit 4 if the socket isn't reachable).
+    Send {
+        /// Session id.
+        id: String,
+        /// Message body.
+        content: String,
+        /// Supervisor label — the agent identity / SOP name (e.g.
+        /// "ga-claude-1"). Required for via=supervisor; optional for
+        /// via=cli.
+        #[arg(long)]
+        supervisor: Option<String>,
+        /// Free-text reason for the action. Shows up in audit/log views.
+        #[arg(long)]
+        reason: Option<String>,
+    },
+    /// Stream live IPC events from a session's runner (B2 M4). NDJSON
+    /// on stdout — one event per line. Exits cleanly when the
+    /// subprocess terminates (`{"stream":"end",...}`) or the user
+    /// sends SIGINT.
+    Watch {
+        /// Session id.
+        id: String,
     },
 }
 
@@ -187,6 +214,13 @@ async fn run(cli: Cli) -> Result<(), GalleyError> {
             }
             Ok(())
         }
+        Command::Session(SessionCmd::Send {
+            id,
+            content,
+            supervisor,
+            reason,
+        }) => session_send(id, content, supervisor, reason).await,
+        Command::Session(SessionCmd::Watch { id }) => session_watch(id).await,
         Command::Status => {
             let galley = SqliteGalley::open().await?;
             let s = galley.status().await?;
@@ -241,4 +275,235 @@ fn emit_json<T: serde::Serialize>(value: &T) -> Result<(), GalleyError> {
     })?;
     println!("{s}");
     Ok(())
+}
+
+// ---- socket transport helpers (B2 M4) ----
+
+/// One round-trip request → response over the Unix socket / Windows
+/// named pipe. Maps connect errors to `DbUnavailable` (exit 4) per the
+/// CLI exit-code contract.
+#[cfg(unix)]
+async fn socket_send_recv(req: serde_json::Value) -> Result<String, GalleyError> {
+    use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+    use tokio::net::UnixStream;
+    let path = socket_path();
+    let stream = UnixStream::connect(&path).await.map_err(|e| {
+        GalleyError::DbUnavailable {
+            message: format!(
+                "Galley Core not running (socket {}: {})",
+                path.display(),
+                e
+            ),
+        }
+    })?;
+    let (read_half, mut write_half) = stream.into_split();
+    let line = serde_json::to_string(&req).unwrap();
+    write_half
+        .write_all(line.as_bytes())
+        .await
+        .map_err(|e| GalleyError::DbUnavailable {
+            message: format!("socket write: {e}"),
+        })?;
+    write_half
+        .write_all(b"\n")
+        .await
+        .map_err(|e| GalleyError::DbUnavailable {
+            message: format!("socket write: {e}"),
+        })?;
+    write_half
+        .flush()
+        .await
+        .map_err(|e| GalleyError::DbUnavailable {
+            message: format!("socket flush: {e}"),
+        })?;
+    let mut lines = BufReader::new(read_half).lines();
+    let resp = lines
+        .next_line()
+        .await
+        .map_err(|e| GalleyError::DbUnavailable {
+            message: format!("socket read: {e}"),
+        })?
+        .ok_or_else(|| GalleyError::DbUnavailable {
+            message: "socket EOF before response".into(),
+        })?;
+    Ok(resp)
+}
+
+#[cfg(windows)]
+async fn socket_send_recv(req: serde_json::Value) -> Result<String, GalleyError> {
+    use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+    use tokio::net::windows::named_pipe::ClientOptions;
+    let path = socket_path();
+    let path_str = path.to_str().ok_or_else(|| GalleyError::Internal {
+        message: "named pipe path not UTF-8".into(),
+    })?;
+    let stream = ClientOptions::new()
+        .open(path_str)
+        .map_err(|e| GalleyError::DbUnavailable {
+            message: format!("Galley Core not running (pipe {}: {})", path_str, e),
+        })?;
+    let (read_half, mut write_half) = tokio::io::split(stream);
+    let line = serde_json::to_string(&req).unwrap();
+    write_half
+        .write_all(line.as_bytes())
+        .await
+        .map_err(|e| GalleyError::DbUnavailable {
+            message: format!("pipe write: {e}"),
+        })?;
+    write_half
+        .write_all(b"\n")
+        .await
+        .map_err(|e| GalleyError::DbUnavailable {
+            message: format!("pipe write: {e}"),
+        })?;
+    write_half
+        .flush()
+        .await
+        .map_err(|e| GalleyError::DbUnavailable {
+            message: format!("pipe flush: {e}"),
+        })?;
+    let mut lines = BufReader::new(read_half).lines();
+    let resp = lines
+        .next_line()
+        .await
+        .map_err(|e| GalleyError::DbUnavailable {
+            message: format!("pipe read: {e}"),
+        })?
+        .ok_or_else(|| GalleyError::DbUnavailable {
+            message: "pipe EOF before response".into(),
+        })?;
+    Ok(resp)
+}
+
+async fn session_send(
+    id: String,
+    content: String,
+    supervisor: Option<String>,
+    reason: Option<String>,
+) -> Result<(), GalleyError> {
+    let req = serde_json::json!({
+        "command": "session.send",
+        "args": {
+            "sessionId": id,
+            "content": content,
+            "supervisor": supervisor,
+            "reason": reason,
+        },
+        "schemaVersion": SCHEMA_VERSION,
+    });
+    let resp_line = socket_send_recv(req).await?;
+    // Parse + decide whether to surface as success (exit 0) or map to
+    // a CLI error (exit code based on the `error` discriminant).
+    let parsed: serde_json::Value =
+        serde_json::from_str(&resp_line).map_err(|e| GalleyError::Internal {
+            message: format!("malformed socket response: {e}"),
+        })?;
+    if parsed["ok"] == serde_json::Value::Bool(true) {
+        // Pass the result through as-is so agents can parse the
+        // assigned message id + dispatch status.
+        println!("{}", parsed["result"]);
+        Ok(())
+    } else {
+        let tag = parsed["error"].as_str().unwrap_or("internal");
+        let msg = parsed["message"].as_str().unwrap_or("").to_string();
+        Err(map_error_tag(tag, msg))
+    }
+}
+
+async fn session_watch(id: String) -> Result<(), GalleyError> {
+    use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+    // Streaming subscription: we hand-roll the loop here rather than
+    // reusing socket_send_recv because we keep the connection open.
+    let req = serde_json::json!({
+        "command": "session.watch",
+        "args": { "sessionId": id },
+        "schemaVersion": SCHEMA_VERSION,
+    });
+
+    #[cfg(unix)]
+    let (read_half, mut write_half) = {
+        use tokio::net::UnixStream;
+        let path = socket_path();
+        let stream = UnixStream::connect(&path).await.map_err(|e| {
+            GalleyError::DbUnavailable {
+                message: format!(
+                    "Galley Core not running (socket {}: {})",
+                    path.display(),
+                    e
+                ),
+            }
+        })?;
+        stream.into_split()
+    };
+    #[cfg(windows)]
+    let (read_half, mut write_half) = {
+        use tokio::net::windows::named_pipe::ClientOptions;
+        let path = socket_path();
+        let path_str = path.to_str().ok_or_else(|| GalleyError::Internal {
+            message: "named pipe path not UTF-8".into(),
+        })?;
+        let stream = ClientOptions::new()
+            .open(path_str)
+            .map_err(|e| GalleyError::DbUnavailable {
+                message: format!("Galley Core not running (pipe {}: {})", path_str, e),
+            })?;
+        tokio::io::split(stream)
+    };
+
+    let line = serde_json::to_string(&req).unwrap();
+    write_half
+        .write_all(line.as_bytes())
+        .await
+        .map_err(|e| GalleyError::DbUnavailable {
+            message: format!("watch write: {e}"),
+        })?;
+    write_half
+        .write_all(b"\n")
+        .await
+        .map_err(|e| GalleyError::DbUnavailable {
+            message: format!("watch write: {e}"),
+        })?;
+    write_half
+        .flush()
+        .await
+        .map_err(|e| GalleyError::DbUnavailable {
+            message: format!("watch flush: {e}"),
+        })?;
+
+    let mut lines = BufReader::new(read_half).lines();
+    while let Some(line) = lines
+        .next_line()
+        .await
+        .map_err(|e| GalleyError::DbUnavailable {
+            message: format!("watch read: {e}"),
+        })?
+    {
+        // Print every line as-is; agents stream-parse the NDJSON. End
+        // sentinel ({"stream":"end",...}) flows through unchanged and
+        // the loop exits because the server closes the connection.
+        println!("{line}");
+        let parsed: serde_json::Value =
+            serde_json::from_str(&line).unwrap_or(serde_json::Value::Null);
+        // Stream-end + initial-error responses both close the loop.
+        if parsed["stream"] == "end" {
+            break;
+        }
+        if parsed["ok"] == serde_json::Value::Bool(false) {
+            let tag = parsed["error"].as_str().unwrap_or("internal");
+            let msg = parsed["message"].as_str().unwrap_or("").to_string();
+            return Err(map_error_tag(tag, msg));
+        }
+    }
+    Ok(())
+}
+
+/// Map a server-side error discriminant tag onto the CLI's typed
+/// error so exit_code_for() picks the right exit code.
+fn map_error_tag(tag: &str, msg: String) -> GalleyError {
+    match tag {
+        "not_found" => GalleyError::NotFound { message: msg },
+        "invalid_args" => GalleyError::InvalidArgs { message: msg },
+        "db_unavailable" => GalleyError::DbUnavailable { message: msg },
+        _ => GalleyError::Internal { message: msg },
+    }
 }

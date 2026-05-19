@@ -32,13 +32,14 @@ docs/refactor/
 ```
 Phase:    Prototype ✅ → B1 ✅ → [B2] → B3 → B4 → v0.5
                                   ↑ 现在在这里
-Status:   B2 M1 + M2 + M3 COMPLETE — RunnerManager Rust + Tauri command surface +
-          bridge.ts thin invoke/listen shim + Unix socket / named pipe listener live
-          New: core/src/socket_listener.rs (NDJSON protocol + per-UID socket + 0600 perm)
-               docs/ipc-protocol.md §2 rewritten with Socket Transport section
-          Tests: 42 lib + 9 + 7 + 6 + 13 = 77 total pass
-Next:     B2 M4 T4.1 — CLI session send + watch via socket (first write command)
-Blocker:  T2.10 + T3.13 manual smoke pending — JC dogfood before M4 ideally
+Status:   B2 M1-M5 COMPLETE — full read+write transport pipeline:
+          Rust RunnerManager + Tauri commands + Unix socket / named pipe +
+          CLI session send/watch + origin schema migrations 006/007
+          GalleyApi::send_message wired through socket → DB persist + best-effort
+          runner dispatch + origin triple (gui/cli/supervisor/system + supervisor + reason)
+          Tests: 45 lib + 9 + 7 + 8 + 13 = 82 total pass
+Next:     B2 M6 T6.1 — docs/agent-api.md increment (socket commands + stability)
+Blocker:  T2.10 + T3.13 + T4.10/T4.11 manual smoke pending — JC dogfood window
 ```
 
 **Cursor 更新协议**：每个 sub-task 完成 → 当前 phase playbook 顶部的 cursor 行更新 → 本文件总 cursor 表跟着更新（只 phase 级别）。**不要批量更新**——每 task 一更，防止 session 中断后丢状态。
@@ -49,7 +50,7 @@ Blocker:  T2.10 + T3.13 manual smoke pending — JC dogfood before M4 ideally
 |---|---|---|---|---|
 | Prototype: Rust-owned subprocess | ✅ COMPLETE · 17/17 · GO | — | [bridge-owner/README.md](../../core/experiments/bridge-owner/README.md) | 2026-05-18 session 1: all 5 subsections in one sprint |
 | B1: Rust core 骨架 + CLI 只读 | ✅ COMPLETE · M1-M7 · 11/12 A acceptance | — | [B1-rust-core.md](./B1-rust-core.md) · [devlog](../devlog/2026-05-18-b1-rust-core-complete.md) | 2026-05-18 single session — 21× faster than 3-week estimate |
-| B2: Bridge ownership 迁 Rust | 🚧 M1 + M2 + M3 done · M4-M7 pending | T4.1 | [B2-bridge-ownership.md](./B2-bridge-ownership.md) | 2026-05-19 same session: M1+M2+M3 ship — bridge.ts thin shim + socket listener (Unix + named pipe). 77 tests pass. T2.10 + T3.13 manual smoke pending |
+| B2: Bridge ownership 迁 Rust | 🚧 M1-M5 done · M6 + M7 pending | T6.1 | [B2-bridge-ownership.md](./B2-bridge-ownership.md) | 2026-05-19 same session: M1-M5 ship — full read+write pipeline through Rust. CLI session send + watch + origin migrations 006/007. 82 tests pass |
 | B3: useAppStore 拆 slice + 改订阅 | ⏳ 未启动 | — | [B3-store-slice.md](./B3-store-slice.md) (stub) | 2026-05-15 stub |
 | B4: CLI feature-complete + background + artifact | ⏳ 未启动 | — | [B4-cli-bg-artifact.md](./B4-cli-bg-artifact.md) (stub) | 2026-05-15 stub |
 | **v0.5 milestone** | ⏳ | — | — | — |
