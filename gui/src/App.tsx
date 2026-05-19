@@ -609,8 +609,20 @@ function App() {
               }
               llms={llms}
               onSelectLLM={(idx) => {
+                // Send set_llm whenever a bridge subprocess exists
+                // (spawning or connected). The pre-seed makes the
+                // picker display real models from t=0 (before ready
+                // fires), so gating clicks on "connected" only would
+                // silently drop clicks during the ~430ms cold-spawn
+                // window — popover closes, pill doesn't change, user
+                // perceives "click failed". sendIPCCommand internally
+                // no-ops if `_bridgeClients` has no entry, so idle /
+                // closed / error states still drop safely.
                 if (!activeSessionId) return;
-                if (bridgeStatus === "connected") {
+                if (
+                  bridgeStatus === "connected" ||
+                  bridgeStatus === "spawning"
+                ) {
                   void sendIPCCommand(activeSessionId, {
                     kind: "set_llm",
                     llmIndex: idx,
@@ -721,7 +733,13 @@ function App() {
             console.info("[palette] switch llm: no active session, idx=", idx);
             return;
           }
-          if (bridgeStatus === "connected") {
+          // Same relaxed gate as MainView's onSelectLLM — allow during
+          // spawning so users don't get silent drops in the cold-start
+          // window. sendIPCCommand internally no-ops if no live bridge.
+          if (
+            bridgeStatus === "connected" ||
+            bridgeStatus === "spawning"
+          ) {
             void sendIPCCommand(activeSessionId, {
               kind: "set_llm",
               llmIndex: idx,
