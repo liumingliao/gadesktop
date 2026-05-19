@@ -30,19 +30,18 @@ docs/refactor/
 ## 当前 cursor
 
 ```
-Phase:    Prototype ✅ → B1 ✅ → B2 ✅ → [B3 M1 ✅ M2 ✅ M3 ✅] → M4 → v0.5
-                                              ↑ 现在在这里
-Status:   B3 M2 COMPLETE — uiStore extracted (net -61 lines). M2 启动门
-          tactical override (N4) ship 后 JC dogfood 发现 Desktop Pet 失败
-          → 根因 B2 IPC schema drift（AttachPetCommand variant 字段）→
-          独立 commit 5facf1e 修好 + Pet/UI 路径 dogfood 暂未发现其它问题.
-          B3 M1 deliverables (3 artifact + devlog) ship in 91438f8.
-          B3 prereq relaxation (scenarios + 双层 gate) ship in 62739f6.
-Next:     B3 M4 T4.1 — sessionsStore 抽离 + 订阅化 (fresh session 重开)
-          M4 必须动 Rust (不像 M3 守 B3-I4 不动): 18 个 session/project
-          CRUD trait method 加进 GalleyApi 是「独立 commit 不混
-          frontend」(G5 警示)
-Blocker:  无 (M3 dogfood pass) — M4 启动条件就绪
+Phase:    Prototype ✅ → B1 ✅ → B2 ✅ → [B3 M1 ✅ M2 ✅ M3 ✅ M4 sub-plan ✅] → M4a → M4b → v0.5
+                                                                ↑ 现在在这里
+Status:   B3 M4 sub-plan COMPLETE — [B3-M4-sub-plan.md](./B3-M4-sub-plan.md)
+          落地。M4 拆 **M4a (Rust trait + tests, 独立 commit)** +
+          **M4b (frontend sessionsStore 抽离, fresh session)** 两阶段。
+          M4a scope 精确数：12 session method + 4 project method = 16
+          (playbook 「18」是粗估)。setActiveSession / activateSession 是
+          pure display state op，不需要 trait method。R1-R8 risk register
+          + 7 verification gate 落清。
+Next:     B3 M4a T4a.1 — Rust input types (CreateSessionInput /
+          SessionPatch / CreateProjectInput / ProjectPatch / BulkResult)
+Blocker:  无
 ```
 
 **Cursor 更新协议**：每个 sub-task 完成 → 当前 phase playbook 顶部的 cursor 行更新 → 本文件总 cursor 表跟着更新（只 phase 级别）。**不要批量更新**——每 task 一更，防止 session 中断后丢状态。
@@ -54,7 +53,7 @@ Blocker:  无 (M3 dogfood pass) — M4 启动条件就绪
 | Prototype: Rust-owned subprocess | ✅ COMPLETE · 17/17 · GO | — | [bridge-owner/README.md](../../core/experiments/bridge-owner/README.md) | 2026-05-18 session 1: all 5 subsections in one sprint |
 | B1: Rust core 骨架 + CLI 只读 | ✅ COMPLETE · M1-M7 · 11/12 A acceptance | — | [B1-rust-core.md](./B1-rust-core.md) · [devlog](../devlog/2026-05-18-b1-rust-core-complete.md) | 2026-05-18 single session — 21× faster than 3-week estimate |
 | B2: Bridge ownership 迁 Rust | ✅ COMPLETE · M1-M7 · 83 tests pass · tag `b2-complete` | — | [B2-bridge-ownership.md](./B2-bridge-ownership.md) · [devlog](../devlog/2026-05-19-b2-bridge-ownership-complete.md) | 2026-05-19 single session — full pipeline + docs + tag. Dogfood validation moved to B3 M2 启动门 ([prereq relaxation devlog](../devlog/2026-05-19-b3-prereq-relaxation.md)) |
-| B3: useAppStore 拆 slice + 改订阅 | 🟡 M1 ✅ + M2 ✅ + M3 ✅ (runtimeStore + LLM/bridge migration) | T4.1 (M4 sessionsStore — fresh session) | [B3-store-slice.md](./B3-store-slice.md) · M1 [devlog](../devlog/2026-05-19-b3-m1-design-complete.md) · M3 [devlog](../devlog/2026-05-19-b3-m3-complete.md) · 3 M1 design artifact [mapping](./b3-slice-mapping.md)/[ADR](./b3-slice-adr.md)/[emit catalogue](./b3-rust-emit-catalogue.md) · [M3 sub-plan](./B3-M3-sub-plan.md) | 2026-05-19 second session: perf baseline + 4 B2 latent bug fix + M3 sub-plan + M3a + M3b (~1000 LOC net delete from useAppStore, 9 commits). JC dev dogfood validated. M4 fresh session 待开 |
+| B3: useAppStore 拆 slice + 改订阅 | 🟡 M1 ✅ + M2 ✅ + M3 ✅ + M4 sub-plan ✅ | T4a.1 (M4a Rust trait + tests) | [B3-store-slice.md](./B3-store-slice.md) · M1 [devlog](../devlog/2026-05-19-b3-m1-design-complete.md) · M3 [devlog](../devlog/2026-05-19-b3-m3-complete.md) · 3 M1 design artifact [mapping](./b3-slice-mapping.md)/[ADR](./b3-slice-adr.md)/[emit catalogue](./b3-rust-emit-catalogue.md) · [M3 sub-plan](./B3-M3-sub-plan.md) · [M4 sub-plan](./B3-M4-sub-plan.md) | 2026-05-19 third session: M4 sub-plan ship (16 trait method 精确签名 + R1-R8 risk + 7 verification gate). M4a Rust trait independent commit 待推. |
 | B4: CLI feature-complete + background + artifact | ⏳ 未启动 | — | [B4-cli-bg-artifact.md](./B4-cli-bg-artifact.md) (stub) | 2026-05-15 stub |
 | **v0.5 milestone** | ⏳ | — | — | — |
 
