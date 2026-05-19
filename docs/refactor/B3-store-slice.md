@@ -2,9 +2,9 @@
 
 ```
 Cursor:   T1.1  (B3 未启动 · M1 第一个 sub-task — 静态分析 + slice 映射表)
-Status:   ⏳ 未启动 · 详细 playbook 已升格 (was 117-line stub, 2026-05-19)
+Status:   ⏳ 未启动 · 详细 playbook 已升格 (was 117-line stub, 2026-05-19) · prereq relaxation 双层 gate (2026-05-19)
 Started:  -
-Last touch: 2026-05-19 — stub 升格到 B1/B2 同等粒度
+Last touch: 2026-05-19 — prereq 从「1 周日历仪式」改成事件驱动双层 gate (M1 / M2)，详 N1
 Predecessor: B2 完成 (M1-M7 + tag b2-complete) + dogfood 1 周稳定期
 Successor:   B4 (CLI feature-complete + background mode + adapter artifact)
 Duration:    3-4 周估计（D31-D50+，按 PRD 节奏），但 stub 已警告"3-4 周可能拖到 5-6 周"
@@ -27,12 +27,19 @@ Duration:    3-4 周估计（D31-D50+，按 PRD 节奏），但 stub 已警告"3
 
 ## Prerequisites · 必须先完成
 
-- [ ] B2 全部 acceptance criteria 跑过 + devlog ship + tag `b2-complete`
-- [ ] B2 完成后 **dogfood 1 周稳定期**：确保 runner ownership 迁移、socket transport、CLI session send/watch 没有积累的 regression
-- [ ] B1+B2 累积的 dogfood scenario 列表（写入 `docs/refactor/dogfood-scenarios.md` 或 inline 在 playbook）— 用作 B3 每次迁完后的 regression suite
-- [ ] B2 M7 性能基线数据（first-token RTT / streaming throughput）已记录 — B3 完成时用 [invariants.md §I7](./invariants.md#i7-性能-gate) 验证不变差
+按 [CLAUDE.md「事件驱动，非日历驱动」](../../CLAUDE.md) 原则分两层 gate（2026-05-19 relaxation · [devlog](../devlog/2026-05-19-b3-prereq-relaxation.md)）。
 
-**未达 prerequisites 不允许启动 B3**。每一条都要打勾才能开 T1.1。
+**M1 启动门（T1.1 设计阶段进入）**：
+
+- [x] B2 acceptance + devlog ship + tag `b2-complete`（2026-05-19 ship）
+- [x] B1+B2 dogfood scenarios 列表写到 [`docs/refactor/dogfood-scenarios.md`](./dogfood-scenarios.md) — 35 项 A/B/C/D 分类（2026-05-19 落地）
+
+**M2 启动门（开始改 frontend 代码前必须达成）**：
+
+- [ ] scenarios JC 真跑过一遍 GA task 签字「未发现 B2 regression」— 事件驱动而非日历驱动
+- [ ] B2 性能基线（first-token RTT / streaming throughput）测出来落到 `docs/refactor/perf-baseline.md` — B3 完成时用 [invariants.md §I7](./invariants.md#i7-性能-gate) 对比
+
+理由：M1 全是 paperwork（slice mapping ADR + emit event catalogue，0 代码改动），跟 B2 dogfood 可并行无 risk。M2 起改 frontend 代码，B2 regression 跟 B3 改动一旦混在一起难定位 — strict gate 卡在 M2 前。前版「1 周日历仪式」单用户项目不可 enforce，事件驱动更诚实。
 
 ## Phase invariants · B3 特有的硬规则
 
@@ -244,7 +251,7 @@ Duration:    3-4 周估计（D31-D50+，按 PRD 节奏），但 stub 已警告"3
 
 ### Session 跑下来追加的 notes（按日期）
 
-（B3 启动前空白；启动后每次 session 结束追加 N1 / N2 / ...）
+- **N1 (2026-05-19, pre-T1.1)** — Prereq relaxation: 把 "B2 完成后 dogfood 1 周稳定期" 单层 gate 拆成「M1 启动门」（轻，scenarios 列表先写）+「M2 启动门」（重，scenarios JC 真跑过签字 + perf baseline 测好）。理由 + rejected alternatives 详 [devlog](../devlog/2026-05-19-b3-prereq-relaxation.md)。**触发**：B2 ship 当天 JC 想推 B3，发现单层 gate 跟 B2 完成 devlog 自己的话（"the dogfood period is an empirical confidence-building step, not a gating contract"）+ CLAUDE.md「事件驱动，非日历驱动」原则双重冲突，且 T1.1（pure paperwork）跟 M2（动 frontend 代码）风险差 100×，同 gate 拦不合理
 
 ---
 
