@@ -2,6 +2,7 @@ pub mod api;
 pub mod db;
 pub mod error;
 pub mod ipc;
+pub mod runner_commands;
 pub mod runner_manager;
 
 use api::{GalleyApi, SessionBrief, SessionFilter};
@@ -111,7 +112,23 @@ pub fn run() {
                 .add_migrations(DB_URL, migrations)
                 .build(),
         )
-        .invoke_handler(tauri::generate_handler![path_exists, list_sessions])
+        // RunnerManager is the single Rust authority for Python runner
+        // subprocesses (B2 M1). Held as Tauri app state so the
+        // `spawn_runner` / `send_to_runner` / etc. commands all reach the
+        // same instance. Window close + app quit must call
+        // `shutdown_all_runners` from JS — there isn't a clean hook here
+        // to await async cleanup before Tauri tears the runtime down.
+        .manage(runner_manager::RunnerManager::new())
+        .invoke_handler(tauri::generate_handler![
+            path_exists,
+            list_sessions,
+            runner_commands::spawn_runner,
+            runner_commands::send_to_runner,
+            runner_commands::shutdown_runner,
+            runner_commands::kill_runner,
+            runner_commands::runner_stderr_tail,
+            runner_commands::shutdown_all_runners,
+        ])
         .setup(|_app| {
             // Windows-only custom chrome: drop native decorations and
             // restore the drop shadow via window-shadows-v2 so the borderless

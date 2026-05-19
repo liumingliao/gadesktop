@@ -32,13 +32,14 @@ docs/refactor/
 ```
 Phase:    Prototype ✅ → B1 ✅ → [B2] → B3 → B4 → v0.5
                                   ↑ 现在在这里
-Status:   B2 M1 COMPLETE — RunnerManager scaffold + 35 tests passing
-          Modules: core/src/ipc.rs · core/src/runner_manager/{mod,process,manager,error}.rs
-          Tests: 26 lib + 9 integration (mock Python subprocess in tempdir)
-          B1 ✅ tag b1-complete · B2 playbook upgraded same session
-Next:     B2 M2 T2.1 — Tauri command wrappers + bridge.ts thin shim
-          (spawn_runner / send_to_runner / shutdown_runner / kill_runner)
-Blocker:  无
+Status:   B2 M1 + M2 COMPLETE — RunnerManager Rust + Tauri command surface +
+          bridge.ts thin invoke/listen shim (signature byte-identical, B2-I1)
+          New: core/src/runner_commands.rs (5 Tauri commands + emit_task)
+               check.yml runs `cargo test -p galley-core/cli` per matrix target
+          Tests: 30 lib + 9 integration + 6 cli + 13 db_test = 58 total pass
+Next:     B2 M3 T3.1 — Unix socket / named pipe listener (CLI write entry)
+          (core/src/socket_listener.rs scaffold, then NDJSON protocol)
+Blocker:  T2.10 dogfood pending — JC manual multi-session run before M3 ideally
 ```
 
 **Cursor 更新协议**：每个 sub-task 完成 → 当前 phase playbook 顶部的 cursor 行更新 → 本文件总 cursor 表跟着更新（只 phase 级别）。**不要批量更新**——每 task 一更，防止 session 中断后丢状态。
@@ -49,7 +50,7 @@ Blocker:  无
 |---|---|---|---|---|
 | Prototype: Rust-owned subprocess | ✅ COMPLETE · 17/17 · GO | — | [bridge-owner/README.md](../../core/experiments/bridge-owner/README.md) | 2026-05-18 session 1: all 5 subsections in one sprint |
 | B1: Rust core 骨架 + CLI 只读 | ✅ COMPLETE · M1-M7 · 11/12 A acceptance | — | [B1-rust-core.md](./B1-rust-core.md) · [devlog](../devlog/2026-05-18-b1-rust-core-complete.md) | 2026-05-18 single session — 21× faster than 3-week estimate |
-| B2: Bridge ownership 迁 Rust | 🚧 M1 done · M2-M7 pending | T2.1 | [B2-bridge-ownership.md](./B2-bridge-ownership.md) | 2026-05-19 M1 ship — RunnerManager + RunnerProcess + ipc.rs + 35 tests (lib 26 + integration 9) |
+| B2: Bridge ownership 迁 Rust | 🚧 M1 + M2 done · M3-M7 pending | T3.1 | [B2-bridge-ownership.md](./B2-bridge-ownership.md) | 2026-05-19 same session: M1 + M2 ship — bridge.ts thin shim over Rust runner_manager (signature locked, B2-I1). 58 tests pass. T2.10 dogfood pending |
 | B3: useAppStore 拆 slice + 改订阅 | ⏳ 未启动 | — | [B3-store-slice.md](./B3-store-slice.md) (stub) | 2026-05-15 stub |
 | B4: CLI feature-complete + background + artifact | ⏳ 未启动 | — | [B4-cli-bg-artifact.md](./B4-cli-bg-artifact.md) (stub) | 2026-05-15 stub |
 | **v0.5 milestone** | ⏳ | — | — | — |

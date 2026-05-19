@@ -94,3 +94,20 @@ jobs:
       - name: Cargo check
         working-directory: ./core
         run: cargo check --target ${{ matrix.target }}
+
+      # B2 M1 added a real Rust test suite (lib unit + integration tests
+      # spawning mock Python subprocesses against the runner_manager).
+      # `cargo check` only validates compilation; `cargo test` is where
+      # IPC parsing, LRU eviction, and Tauri command shapes get exercised.
+      #
+      # We do NOT run `--workspace` here — the workspace currently includes
+      # `core` + `../cli`, and the CLI's integration tests need the
+      # `galley` binary built first, which is a slower job. Per-package
+      # runs let each fail independently and report clearly.
+      - name: Cargo test (core)
+        working-directory: ./core
+        run: cargo test --target ${{ matrix.target }} -p galley-core
+
+      - name: Cargo test (cli)
+        working-directory: ./core
+        run: cargo test --target ${{ matrix.target }} -p galley-cli
