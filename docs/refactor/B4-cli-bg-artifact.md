@@ -312,6 +312,34 @@ v0.5 RC → v0.5 GA 的 release ceremony。Paperwork prep (T9.0 + T9.3 + T9.4 dr
 
 - **N1 (2026-05-20, B4 playbook 升格)** — Stub (144 行) 升格成详细 playbook (~500 行)。沿用 B3 sub-plan-then-impl 模式：M1-M9 每个 milestone 实施前**单独写 sub-plan**。Acceptance 沿用 stub A1-A14 不动。新增 B4-I1..I7 phase invariants（沿用 CLAUDE.md 4 条架构原则 + B4 特定规则如 schema freeze / SOP 路径固定 / migration 备份强制）。Sub-task 颗粒度跟 B1/B2/B3 对齐（T1.1-TN.X 数字编号 + sub-task 完成标志逐 milestone 列）。Open: [O1-O6 沿用 stub](#open-decisions)；新加 [O7 NEW](#open-decisions-new) tray spike 何时跑（prereq 阶段 vs M2 开头）+ [O8 NEW](#open-decisions-new) M3 PATH install 失败 fallback strategy。
 
+- **N22 (2026-05-20 late night, M2 tray-mode spike scaffold ship — build verification handed to JC)** — Followed N21 with M2 Mac spike attempt. Spike scaffolded per `core/experiments/tray-mode/README.md` spec: own workspace `Cargo.toml` + `build.rs` + `tauri.conf.json` (identifier `app.galley.m2spike` isolated) + `index.html` (heartbeat counter + hidden-time tracker) + `src/main.rs` (tray menu Show/status/Quit + `WindowEvent::CloseRequested → hide` + heartbeat thread via `std::thread::spawn`) + `icons/icon.png` (copied from production).
+
+**Build cycle hit Tauri/objc2 toolchain friction** (5 attempts):
+1. Build #1 cold WITH objc2 deps: ✅ compiled in 1m57s
+2. Run #1: ✗ runtime panic — `tokio::spawn` no reactor (Tauri tao event loop ≠ tokio context). Fix: `tauri::async_runtime::spawn`
+3. Build #2: ✗ clang linker error (Foundation framework link?) — `tail -10` log truncation lost the actual error
+4. Build #3 cold full-log: ✗ killed at 13min rustc codegen hang in `objc2-foundation` macro expansion
+5. Build #4 `CARGO_INCREMENTAL=0`: ✗ same hang at 8min
+6. Build #5 (dropped objc2 entirely + `std::thread::spawn`): ⏸ killed at 6min mid Tauri 2.11 cold rebuild — JC opted to take over locally rather than burn more session on cargo cold-cache
+
+**Decision: App Nap defeat (T17-T19) pulled OUT of this spike**. After 30+ min on Foundation framework link issues, made the call to drop `objc2` + `objc2-foundation` deps + `app_nap.rs` entirely. T17-T19 graduate to a smaller standalone probe binary (no Tauri) once T1-T16 main path is verified. If T13/T14 (WebView keep-alive while hidden) PASS in JC's local run, App Nap defeat is less critical.
+
+**T1-T16 verification deferred to JC**. Spike code is complete; what's left is the visual / behavioral check (manual). Results template in [`core/experiments/tray-mode/results.md`](../../core/experiments/tray-mode/results.md) has T1-T16 rows with ⏳ ready for fill-in. JC's local procedure:
+```bash
+cd core/experiments/tray-mode
+cargo build              # 8-15min cold Tauri 2.11 rebuild on local machine
+./target/debug/tray-mode-spike   # launch + manual menubar / close / Quit checks
+```
+
+**Acceptance impact**: A3 / A4 still ⏳ — gated on JC's spike T1-T16 results. No status change from N21.
+
+**Open**:
+1. Why did objc2-foundation codegen hang at 8-13min? Two Build attempts showed same pathological behavior. Could be `bitflags-2` interplay or NSProcessInfo binding's heavy generic instantiation. Re-investigate when separate App Nap probe ships.
+2. Build #2's linker error was lost to `tail -10` truncation. Worth one more cargo-verbose attempt if probe stays simple.
+3. If JC's local build succeeds + T1-T16 PASS, M2 production implementation lifts straight from `src/main.rs` (close handler shape + tray menu structure).
+
+**Next session pickup**: JC reports T1-T16 manual results → either (a) GO for M2 production implementation in `core/src/lib.rs` setup hook + standalone App Nap probe / (b) NO-GO findings + rethink.
+
 - **N21 (2026-05-20 night, A9/A10/A12 dogfood pass + A13 architecture demo ship)** — JC dogfood 同日 pass："dogfood 后没有发现什么问题，继续推进"。**Acceptance ticks unlocked**: A9 ✅ (M4 SOP — 手动 supervisor flow tested) / A10 ✅ (M5 Claude Skill trigger validated) / A12 ✅ (M7 supervisor activity GUI annotation + TopBar pill rendered). **A13 ✅ shipped** via [docs/architecture-demo.md](../architecture-demo.md) NEW (~210 LOC) — walks through 4 CLAUDE.md architecture principles with: per-principle code refs (line-number anchored) + grep gates + tests demonstrating principle + document references. **All 4 grep gates exit 0** verified inline: P1 (no TcpListener in core/src/) / P2 (FROZEN banner in agent-api.md) / P3 (no supervisor_chat / conversation_log in core/src/ + core/migrations/) / P4 (gui/src/stores/useAppStore.ts absent post-B3 M6). **B4 acceptance status now**: A1 ✅ A2 ✅ A3 ⏳(M2) A4 ⏳(M2) A5 ✅ A6 ✅ A7 ✅(macOS) A8 ✅ A9 ✅ A10 ✅ A11 ✅(partial, dogfood deferred v0.6+) A12 ✅ A13 ✅ A14 ⏳(M9 1-week dogfood). **10 ✅ / 1 ✅partial / 3 ⏳** — 剩下 3 个全都 calendar / Win-machine gate: M2 menubar + 1-week dogfood + （implicitly）M9 release ceremony. **v0.5 ship 距离最近的一次**：技术上 A1-A13 全 ✅ 后 v0.5 RC 可以拍板，唯一硬 gate 就是 A14 一周 dogfood 加 M2 Win 支持（如选 v0.5 Mac-only ship 则 M2 Mac 部分单独跑也能）. **Next pickup**: cleanup commit (3 pre-existing clippy lints) + DESIGN.md onboarding subtitle T9.3 follow-up check + （以下需要 JC 同意）M2 Mac-only spike 或等 1-week dogfood 完成。
 
 - **N20 (2026-05-20 evening, M9 paperwork prep COMPLETE · sub-plan + README rewrite + release notes draft + PRD align)** — Followed M8 ship with M9 prep (per user "继续推进" instruction). **Scope = paperwork only** (T9.0 / T9.3 / T9.4 draft / T9.7); ship-gated items (T9.1 acceptance / T9.2 dogfood / T9.5 tag / T9.6 publish / T9.8 devlogs) all calendar / JC gated, deferred to M9 ship session.

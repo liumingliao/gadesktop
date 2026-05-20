@@ -45,16 +45,16 @@ Status:   B4 acceptance 10 ✅ / 1 ✅partial / 3 ⏳ (2026-05-20 night):
           (A13) docs/architecture-demo.md ship — walks 4 CLAUDE.md
           architecture principles with code refs + grep gates (4 gate
           all exit 0) + tests + devlog provenance.
-Next:     v0.5 ship gate = A14 1-week dogfood + (optional) M2 menubar
-          daemon. With current 10 ✅, A14 is the only remaining
-          procedural gate. M9 ship session = T9.1 acceptance walkthrough
-          + T9.5 tag v0.5.0 + T9.6 GitHub publish + T9.8 devlogs.
-          Immediate pickup options: (a) cleanup 3 pre-existing clippy
-          lints (b) DESIGN.md onboarding subtitle T9.3 follow-up
-          (c) M2 Mac-only spike (if v0.5 ships Mac-first) (d) wait for
-          A14 dogfood.
+Next:     v0.5 ship gate = A14 1-week dogfood + M2 menubar daemon.
+          M2 Mac spike scaffold shipped (see core/experiments/tray-mode/),
+          build verification + T1-T16 manual checks handed to JC for
+          local run (Tauri 2.11 cold rebuild was 8-15min on this session;
+          JC takes the launch + smoke check). Once T1-T16 PASS → lift
+          load-bearing pieces into core/src/lib.rs production setup hook.
+          M9 ship session = T9.1 acceptance walkthrough + T9.5 tag
+          v0.5.0 + T9.6 GitHub publish + T9.8 devlogs.
 Blocker:  A14 calendar gate (1-week). M2 Win-gate if v0.5 wants Win
-          parity.
+          parity. M2 Mac path gated on JC's local spike validation.
 ```
 
 **Cursor 更新协议**：每个 sub-task 完成 → 当前 phase playbook 顶部的 cursor 行更新 → 本文件总 cursor 表跟着更新（只 phase 级别）。**不要批量更新**——每 task 一更，防止 session 中断后丢状态。
