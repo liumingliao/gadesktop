@@ -30,19 +30,22 @@ docs/refactor/
 ## 当前 cursor
 
 ```
-Phase:    Prototype ✅ → B1 ✅ → B2 ✅ → B3 ✅ → [B4 playbook ready] → v0.5
+Phase:    Prototype ✅ → B1 ✅ → B2 ✅ → B3 ✅ → [B4 M1 sub-plan ✅] → v0.5
                                                 ↑ 现在在这里
-Status:   B4 playbook upgraded (2026-05-20, paperwork-only session).
-          400 lines: B4-I1..I7 invariants, A1-A14 acceptance, M1-M9
-          with detailed sub-tasks (T0-T9.X) + 9 gotchas + 9 open
-          decisions + migration pattern. Mirrors B3 sub-plan-then-impl
-          mode — each milestone gets its own sub-plan before impl.
-Next:     B4 prereq gate: tray plugin v2 spike (1 day, mac+win) +
-          dogfood stability window (event-driven per JC's gut check,
-          B4 is phase switch so should be more conservative than
-          milestone switches). Then M1 sub-plan + M1 impl.
-Blocker:  None for B4 paperwork. B4 M1 starts when tray spike passes
-          + dogfood gut check pass.
+Status:   B4 M1 sub-plan shipped 2026-05-20 (paperwork-only session,
+          661 lines, mirrors B3-M6 sub-plan structure). Decisions ship'd:
+          11 subcommands (vs playbook's "7"), 4-commit shape, session
+          stop=Abort (not Shutdown), btw not persisted, exit code 5=
+          runner_error introduced, llm list via SQLite cache (not socket),
+          project move = assign-to-project, project archive = delete.
+          12 risks + 8 rejects + 6 open decisions for JC review.
+Next:     M1 implementation (fresh session). Independent of tray spike,
+          so M1 impl + tray spike scaffold can run in parallel.
+          Recommended order: M1.1 prereq → M1.2 session-write → M1.3
+          project+llm → M1.4 agent-api+tests → dogfood 1-2 day.
+Blocker:  JC review of M1 sub-plan 6 open decisions before M1.1 starts.
+          B4 phase-level gate (tray spike + dogfood window) still pending
+          for M2 start, but M1 doesn't need it.
 ```
 
 **Cursor 更新协议**：每个 sub-task 完成 → 当前 phase playbook 顶部的 cursor 行更新 → 本文件总 cursor 表跟着更新（只 phase 级别）。**不要批量更新**——每 task 一更，防止 session 中断后丢状态。
@@ -55,7 +58,7 @@ Blocker:  None for B4 paperwork. B4 M1 starts when tray spike passes
 | B1: Rust core 骨架 + CLI 只读 | ✅ COMPLETE · M1-M7 · 11/12 A acceptance | — | [B1-rust-core.md](./B1-rust-core.md) · [devlog](../devlog/2026-05-18-b1-rust-core-complete.md) | 2026-05-18 single session — 21× faster than 3-week estimate |
 | B2: Bridge ownership 迁 Rust | ✅ COMPLETE · M1-M7 · 83 tests pass · tag `b2-complete` | — | [B2-bridge-ownership.md](./B2-bridge-ownership.md) · [devlog](../devlog/2026-05-19-b2-bridge-ownership-complete.md) | 2026-05-19 single session — full pipeline + docs + tag. Dogfood validation moved to B3 M2 启动门 ([prereq relaxation devlog](../devlog/2026-05-19-b3-prereq-relaxation.md)) |
 | B3: useAppStore 拆 slice + 改订阅 | ✅ COMPLETE · M1-M6 · A1-A11 全 tick · tag `b3-complete` | — | [B3-store-slice.md](./B3-store-slice.md) · [B3 完成 devlog](../devlog/2026-05-20-b3-store-slice-complete.md) · M1 [devlog](../devlog/2026-05-19-b3-m1-design-complete.md) · M3 [devlog](../devlog/2026-05-19-b3-m3-complete.md) · M4 [devlog](../devlog/2026-05-19-b3-m4-complete.md) · M5 [devlog](../devlog/2026-05-19-b3-m5-complete.md) · 3 M1 design artifact [mapping](./b3-slice-mapping.md)/[ADR](./b3-slice-adr.md)/[emit catalogue](./b3-rust-emit-catalogue.md) · [M3 sub-plan](./B3-M3-sub-plan.md) · [M4 sub-plan](./B3-M4-sub-plan.md) · [M5 sub-plan](./B3-M5-sub-plan.md) · [M6 sub-plan](./B3-M6-sub-plan.md) | 2026-05-20 sixth session: M6 sub-plan + impl + M7 acceptance + devlog + tag 全 ship。B3 整体跨 6 session、2 day calendar (estimate 3-4 weeks)，21× faster. JC dev dogfood 2026-05-20 initial pass。最终 6 文件 + 1 lib orchestrator. useAppStore.ts 整文件删除. tag `b3-complete`. |
-| B4: CLI feature-complete + background + artifact | 📋 Playbook ready · prereq gate pending | T0 prerequisites (tray spike + dogfood window) | [B4-cli-bg-artifact.md](./B4-cli-bg-artifact.md) | 2026-05-20 stub→full playbook upgrade. 400 行: B4-I1..I7 invariants (CLI surface freeze / localhost only / data 不离开 / 路径 B 不可逆 / SOP 路径固定 / migration 备份强制 / 未签名发布) + A1-A14 acceptance + M1-M9 sub-tasks + 9 gotchas + 9 open decisions + migration pattern. Mirrors B1/B2/B3 sub-plan-then-impl pattern. |
+| B4: CLI feature-complete + background + artifact | 📋 Playbook ready · M1 sub-plan ship · M1 impl pending JC review | T0 prerequisites (tray spike + dogfood window for M2; M1 ready to start) | [B4-cli-bg-artifact.md](./B4-cli-bg-artifact.md) · [B4 M1 sub-plan](./B4-M1-sub-plan.md) | 2026-05-20 second B4 paperwork session: M1 sub-plan 661 lines ship. 11 subcommands拆 + 4-commit shape (prereq → session-write → project+llm → agent-api+tests) + key decisions (session stop=Abort, btw transient, exit 5=runner_error, llm list via SQLite, project archive=delete). 12 risks + 8 rejects + 6 open decisions queued for JC review. M1 impl independent of tray spike (can run parallel). |
 | **v0.5 milestone** | ⏳ | — | — | — |
 
 预计总时长：**10-12 周**（不含 v0.2 Windows release）。

@@ -1,10 +1,10 @@
 # B4 · CLI feature-complete + background mode + adapter artifact
 
 ```
-Cursor:   T0 prerequisites  (B4 未启动；本 playbook 升格 2026-05-20 paperwork-only)
-Status:   📋 Playbook ready · 等 B3 dogfood 稳定期 + tray prototype 1-day spike
+Cursor:   T0 prerequisites  (M1 sub-plan ship 2026-05-20；M1 实施推 fresh session)
+Status:   📋 Playbook ready · M1 sub-plan ship · 等 tray spike 跑 + B3 dogfood 稳定期
 Started:  2026-05-20 (paperwork)
-Last touch: 2026-05-20 — B4 stub 升格成详细 playbook (M1-M9 sub-task 颗粒度跟 B1/B2/B3 对齐 + B4-I1..I7 phase invariants + running notes 框架就位)
+Last touch: 2026-05-20 — M1 sub-plan ship ([B4-M1-sub-plan.md](./B4-M1-sub-plan.md) 661 行；11 个 subcommand 拆 + 4-commit shape + 12 risk + 8 reject + 6 open decision)
 Predecessor: B3 ✅ tag b3-complete
 Successor:   v0.5 milestone ship
 Duration:    PRD estimate 2-3 周（D51-D65），按 B1/B2/B3 节奏可能压缩到 1-2 周
@@ -75,11 +75,11 @@ B4 ship = v0.5 RC，dogfood 一周后 ship 正式 v0.5（dual-native orchestrato
 
 补齐 PRD §11.1 全部 write 命令。每条命令 = 1 trait method + 1 Tauri command（如 GUI 已有 invoke 路径则复用）+ 1 CLI subcommand + 1 socket route。**M1 内 sub-task 颗粒度比 B3 milestone 细**——单条命令是最小 ship 单位，允许多 commit。
 
-> **实施前必读**：B4 M1 sub-plan（实施前一个 paperwork session 写，mirror [B3 M3/M4/M5/M6 sub-plan](./B3-store-slice.md) pattern）。Sub-plan 内决定：(a) 每个命令的 trait method signature + Origin 必填/可选 (b) 单命令独立 commit 还是按 noun group 打包 (c) `docs/agent-api.md` 增量写入策略。
+> **实施前必读**：[B4 M1 sub-plan](./B4-M1-sub-plan.md) (ship 2026-05-20, 661 行)。Sub-plan 内决定：(a) 11 个 subcommand 拆 (playbook "7 commands" 实际按 subcommand 算 11 个) (b) **4-commit shape** by noun-group + prereq commit (c) **session stop = Abort 不 Shutdown** (d) **btw 不持久化** v0.1 保持 (e) **exit code 5=runner_error** 引入 (f) **llm list 走 SQLite cache** 不走 socket (g) **project move = assign_session_to_project** 语义 (h) **project archive = delete_project** v0.5 简化。12 risk + 8 reject + 6 open decisions JC review 后进 T1.1。
 
 ### Sub-tasks
 
-- [ ] **T1.0** M1 sub-plan ship（paperwork-only commit）— mirror M3-M6 sub-plan format
+- [x] **T1.0** M1 sub-plan ship (paperwork-only commit) — [B4-M1-sub-plan.md](./B4-M1-sub-plan.md) ship 2026-05-20
 - [ ] **T1.1** `galley session new "<task>" [--project=X] [--llm=...] [--supervisor=...] [--reason=...]`
   - Rust: `GalleyApi::create_session_with_first_message` — 复用 M4 `create_session` + B2 `send_message`，组合成 atomic 操作（防 race condition：CLI 创建 session 时 GUI 不该看到「空 session 突然来一条消息」）
   - CLI: `session new` subcommand
@@ -326,6 +326,8 @@ v0.5 RC → v0.5 GA 的 release ceremony。
 ### Session 跑下来追加的 notes（按日期）
 
 - **N1 (2026-05-20, B4 playbook 升格)** — Stub (144 行) 升格成详细 playbook (~500 行)。沿用 B3 sub-plan-then-impl 模式：M1-M9 每个 milestone 实施前**单独写 sub-plan**。Acceptance 沿用 stub A1-A14 不动。新增 B4-I1..I7 phase invariants（沿用 CLAUDE.md 4 条架构原则 + B4 特定规则如 schema freeze / SOP 路径固定 / migration 备份强制）。Sub-task 颗粒度跟 B1/B2/B3 对齐（T1.1-TN.X 数字编号 + sub-task 完成标志逐 milestone 列）。Open: [O1-O6 沿用 stub](#open-decisions)；新加 [O7 NEW](#open-decisions-new) tray spike 何时跑（prereq 阶段 vs M2 开头）+ [O8 NEW](#open-decisions-new) M3 PATH install 失败 fallback strategy。
+
+- **N4 (2026-05-20, M1 sub-plan ship · paperwork-only)** — Followed N3 handoff option (c). JC explicit「写 B4 M1 sub-plan」 → ship [B4-M1-sub-plan.md](./B4-M1-sub-plan.md) 661 行 mirror B3-M6 sub-plan structure. **Scope re-assessment** 钉了 8 个跟 playbook stub claim 不一致或需澄清的项：(1) 「7 commands」实际 11 subcommands (playbook 把 noun group 算 1，按 subcommand 拆 = 5 session-write + 4 project + 2 llm = 11)；(2) `create_session_with_first_message` trait method **不加**，socket handler 组合 create_session + send_message 两步 (Reject #2 trade-off：1ms race window 不换 trait + test 复杂度)；(3) `session btw` **不持久化** v0.1 决策保持 + runner 端 `/btw` 前缀已自动旁路；(4) `session stop` **映射到 Abort 不 Shutdown** (bridge 留活下次能 send，跟 GUI 顶栏停止按钮对齐)；(5) `project move` 语义歧义钉「移动 session」CLI surface `project move <sid> [--to=<pid>]`；(6) `project archive` v0.5 = `delete_project` (FK CASCADE SET NULL 保 sessions)，**不**加 archived 字段 scope creep；(7) `llm list` **走 SQLite prefs cache** 不走 socket (秒级响应 vs 5-10s warmup spawn；空 cache = empty NDJSON exit 0 acceptable degradation)；(8) **exit code 5=runner_error 引入** (PRD §11.2 已说，agent-api.md 表漏 row，M1.1 prereq commit 补) + GalleyError::RunnerError variant。**Commit shape decision**: 4-commit = M1.1 prereq (GalleyError + helpers) → M1.2 session-write (5 subcmd + listener) → M1.3 project + llm (6 subcmd + listener) → M1.4 agent-api + tests (200-400 LOC/commit，可独立 cargo check + revert)。**6 open decisions** 留 JC review: (O1) `session new` send_message fail = exit 0 partial vs exit 5？倾向前者；(O2) `project archive` CLI 阻拦 vs SOP 教？倾向 SOP；(O3) `project move` 命名 PRD literal vs subject-correct？倾向保留 PRD；(O4) M4 SOP 演示 archive confirm？倾向显式；(O5) btw origin 通过 Tauri event push 给 M7？倾向 push，M1 不实现；(O6) `session kill` Shutdown surface v0.5 加？倾向不加。**Next pickup options 不变** (per N3): tray spike + B3 dogfood + M1 实施 三轨并行 OK。M1 实施 fresh session 推；preferred 顺序是 M1.1 prereq → M1.2-M1.4 同 session 跑通 + dogfood。
 
 - **N3 (2026-05-20, session-end handoff)** — This session pushed B3 from M5-shipped to B3 ✅ tag `b3-complete`, then B4 paperwork to "playbook ready + tray spike spec ready". Five commits in dependency order: `24f3f04` (M6 sub-plan) → `74b9539` (M6 impl: prefsStore + useAppStore retire) → `640d6f7` (B3 complete devlog + tag b3-complete) → `3efbb4d` (B4 playbook upgrade) → `7971f0f` (B4 tray-mode spike spec). **Next session pickup options**: (a) Tray spike scaffold + run (4-6h, needs JC mac for macOS T1-T2/T5-T6/T9/T11/T13-T14/T17-T19 + Windows machine access for T3-T4/T7-T8/T10/T12/T15-T16) — gate-blocking for B4 M2 start; (b) B3 dogfood continued — JC daily-drives Galley for some more days surfacing latent regressions before B4 starts moving authoritative-state code again; (c) B4 M1 sub-plan (paperwork) — can start in parallel with (a)/(b) since M1 CLI commands don't depend on tray, sub-plan writing is no-risk paperwork. **Recommended pickup**: tray spike scaffold + run as soon as Windows machine is available, since it's the strict gate. If Windows access blocked >1 day → fall back to (c) M1 sub-plan in same session, run Mac-only spike segments, document the gap.
 
