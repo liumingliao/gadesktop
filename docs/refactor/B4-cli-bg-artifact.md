@@ -1,10 +1,10 @@
 # B4 · CLI feature-complete + background mode + adapter artifact
 
 ```
-Cursor:   T0 prerequisites  (M1 sub-plan ship 2026-05-20；M1 实施推 fresh session)
-Status:   📋 Playbook ready · M1 sub-plan ship · 等 tray spike 跑 + B3 dogfood 稳定期
+Cursor:   T1.1 · M1.1 prereq commit (sub-plan ship + 6 O resolved 2026-05-20；M1.1 实施推 fresh session)
+Status:   📋 Playbook ready · M1 sub-plan ship + 6 O resolved · M1.1 ready to implement
 Started:  2026-05-20 (paperwork)
-Last touch: 2026-05-20 — M1 sub-plan ship ([B4-M1-sub-plan.md](./B4-M1-sub-plan.md) 661 行；11 个 subcommand 拆 + 4-commit shape + 12 risk + 8 reject + 6 open decision)
+Last touch: 2026-05-20 PM — M1 sub-plan 6 open decisions resolved (O1 transaction wrap / O2 project delete rename / O3 session move rename / O4-O6 confirm 原 lean)；sub-plan 793 行 含 §9 resolution section + R1/R6/R7 closed + Reject #11/#12/#13 加。M1.1 prereq commit scope 现含 PRD §11.1 rename + tx-aware trait methods + GalleyError::RunnerError + socket helpers
 Predecessor: B3 ✅ tag b3-complete
 Successor:   v0.5 milestone ship
 Duration:    PRD estimate 2-3 周（D51-D65），按 B1/B2/B3 节奏可能压缩到 1-2 周
@@ -326,6 +326,17 @@ v0.5 RC → v0.5 GA 的 release ceremony。
 ### Session 跑下来追加的 notes（按日期）
 
 - **N1 (2026-05-20, B4 playbook 升格)** — Stub (144 行) 升格成详细 playbook (~500 行)。沿用 B3 sub-plan-then-impl 模式：M1-M9 每个 milestone 实施前**单独写 sub-plan**。Acceptance 沿用 stub A1-A14 不动。新增 B4-I1..I7 phase invariants（沿用 CLAUDE.md 4 条架构原则 + B4 特定规则如 schema freeze / SOP 路径固定 / migration 备份强制）。Sub-task 颗粒度跟 B1/B2/B3 对齐（T1.1-TN.X 数字编号 + sub-task 完成标志逐 milestone 列）。Open: [O1-O6 沿用 stub](#open-decisions)；新加 [O7 NEW](#open-decisions-new) tray spike 何时跑（prereq 阶段 vs M2 开头）+ [O8 NEW](#open-decisions-new) M3 PATH install 失败 fallback strategy。
+
+- **N6 (2026-05-20 PM, dogfood watch item · session kill v0.6+)** — O6 resolved「v0.5 不加 `session kill`」附带条件：B4 dogfood + v0.5 ship 后 dogfood 1 周期间，**主动观察 bridge wedge 报告**（Python hang / OOM / IPC deadlock 类）。如出现 1+ 用户/agent 报「bridge 不响应只能 Cmd-Q」→ v0.6+ ship `session kill` (Shutdown surface)。M2 menubar daemon mode 让 Cmd-Q 成本变高（关窗 ≠ 退出），wedge case 应更显眼。watch period: v0.5 ship → v0.6 plan kickoff (1-2 weeks)。
+
+- **N5 (2026-05-20 PM, M1 sub-plan 6 O resolved by JC)** — Same session as N4。JC review M1 sub-plan 6 open decisions:
+  - **O1** `session new` atomicity: Sub-plan 原 lean (exit 0 partial success) → **resolved 第三方案 SQLite transaction wrap + exit 5 runner_error**。R1 closed。+30 LOC handler + 2 trait method (`*_in_tx` variants) + helper refactor。详 sub-plan §1.9 + T1.2。**Reject #13** added。
+  - **O2** `project archive` 命名: Sub-plan 原 lean (保 archive + SOP 教) → **resolved 第三方案 rename CLI 到 `project delete` + PRD §11.1 同步改 + v0.6+ 真 archive 落地 ship 新命令 reversible**。R7 closed。**Reject #12** added。
+  - **O3** `project move` vs `session move`: Sub-plan 原 lean (保 PRD literal) → **resolved 改 `session move <id> --to=<pid>` + PRD §11.1 同步改**（PRD §11.2 #5 自家 grammar rule 「noun=verb subject」对齐）。R6 closed。**Reject #11** added。M1 sub-task 重排：原 T1.6 (project 4-cmd) 拆成 T1.6 (session move new) + T1.7 (project 3-cmd)，downstream T 编号 shift。
+  - **O4** SOP 演示 confirm: confirm 原 lean **punt to M4 sub-plan**。`delete_project` 返 `detachedSessions: count` payload 让 agent 可决定 pre-confirm。
+  - **O5** btw origin push event: confirm 原 lean **M1 socket handler 留 `// TODO(M7)` hook**，零代码成本，M7 sub-plan 决定 payload shape。
+  - **O6** `session kill` Shutdown surface: confirm 原 lean **v0.5 不加** + 新加 N6 dogfood watch item。
+  - **Net impact**: M1 仍 4-commit shape (M1.1-M1.4)；M1.1 prereq scope ↑ (含 PRD §11.1 rename + tx-aware trait methods)；M1.2 session-write 现 6 cmd (含新加 session move)；M1.3 project 现 3 cmd (lose move per O3, archive→delete per O2)。Sub-plan 661→793 行（净 +132 行 含 §1.9 transaction wrap design + §9 resolution + Reject #11/#12/#13 + R1/R6/R7 close 标注 + T1.1 prereq scope 扩展）。
 
 - **N4 (2026-05-20, M1 sub-plan ship · paperwork-only)** — Followed N3 handoff option (c). JC explicit「写 B4 M1 sub-plan」 → ship [B4-M1-sub-plan.md](./B4-M1-sub-plan.md) 661 行 mirror B3-M6 sub-plan structure. **Scope re-assessment** 钉了 8 个跟 playbook stub claim 不一致或需澄清的项：(1) 「7 commands」实际 11 subcommands (playbook 把 noun group 算 1，按 subcommand 拆 = 5 session-write + 4 project + 2 llm = 11)；(2) `create_session_with_first_message` trait method **不加**，socket handler 组合 create_session + send_message 两步 (Reject #2 trade-off：1ms race window 不换 trait + test 复杂度)；(3) `session btw` **不持久化** v0.1 决策保持 + runner 端 `/btw` 前缀已自动旁路；(4) `session stop` **映射到 Abort 不 Shutdown** (bridge 留活下次能 send，跟 GUI 顶栏停止按钮对齐)；(5) `project move` 语义歧义钉「移动 session」CLI surface `project move <sid> [--to=<pid>]`；(6) `project archive` v0.5 = `delete_project` (FK CASCADE SET NULL 保 sessions)，**不**加 archived 字段 scope creep；(7) `llm list` **走 SQLite prefs cache** 不走 socket (秒级响应 vs 5-10s warmup spawn；空 cache = empty NDJSON exit 0 acceptable degradation)；(8) **exit code 5=runner_error 引入** (PRD §11.2 已说，agent-api.md 表漏 row，M1.1 prereq commit 补) + GalleyError::RunnerError variant。**Commit shape decision**: 4-commit = M1.1 prereq (GalleyError + helpers) → M1.2 session-write (5 subcmd + listener) → M1.3 project + llm (6 subcmd + listener) → M1.4 agent-api + tests (200-400 LOC/commit，可独立 cargo check + revert)。**6 open decisions** 留 JC review: (O1) `session new` send_message fail = exit 0 partial vs exit 5？倾向前者；(O2) `project archive` CLI 阻拦 vs SOP 教？倾向 SOP；(O3) `project move` 命名 PRD literal vs subject-correct？倾向保留 PRD；(O4) M4 SOP 演示 archive confirm？倾向显式；(O5) btw origin 通过 Tauri event push 给 M7？倾向 push，M1 不实现；(O6) `session kill` Shutdown surface v0.5 加？倾向不加。**Next pickup options 不变** (per N3): tray spike + B3 dogfood + M1 实施 三轨并行 OK。M1 实施 fresh session 推；preferred 顺序是 M1.1 prereq → M1.2-M1.4 同 session 跑通 + dogfood。
 

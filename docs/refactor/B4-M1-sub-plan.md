@@ -2,9 +2,9 @@
 
 > 用途：B4 playbook [M1](./B4-cli-bg-artifact.md#m1--cli-写命令补齐-d51-d54) 启动前的详细实施 plan，mirror B3 M3/M4/M5/M6 sub-plan 结构。M1 是 **B4 第一个 milestone** —— 补齐 PRD §11.1 全部 write CLI 命令。
 >
-> **状态**：drafting 2026-05-20。本 session ship sub-plan markdown，不动代码。M1 实施推 fresh session（per B3 N5 / N10 / N14 教训：sub-plan + 实施分两 session 是稳定模式）。M1 实施不需要等 tray spike（M2 prereq），跟 [M2 spike scaffold + run](../../core/experiments/tray-mode/README.md) 完全独立可并行。
+> **状态**：drafted 2026-05-20 morning · 6 open decisions resolved 2026-05-20 afternoon (JC review)。本 session ship sub-plan markdown，不动代码。M1 实施推 fresh session（per B3 N5 / N10 / N14 教训：sub-plan + 实施分两 session 是稳定模式）。M1 实施不需要等 tray spike（M2 prereq），跟 [M2 spike scaffold + run](../../core/experiments/tray-mode/README.md) 完全独立可并行。
 >
-> **关键决策**：**4-commit M1**（按 noun-group 拆 + 单独 agent-api commit）+ **session stop 映射到 Abort 不 Shutdown** + **btw 不持久化 v0.1 保持** + **exit code 引入 5=runner_error**（PRD §11.2 已说，agent-api.md 漏 row，本 milestone 补）。详 §2 + §1.4 + §1.5。
+> **关键决策**（含 2026-05-20 PM resolved）：**4-commit M1**（按 noun-group 拆 + 单独 agent-api commit）+ **session stop 映射到 Abort 不 Shutdown** + **btw 不持久化 v0.1 保持** + **exit code 引入 5=runner_error**（PRD §11.2 已说，agent-api.md 漏 row，本 milestone 补）+ **session new 走 SQLite transaction wrap** (O1 resolved — eliminates partial state) + **`project archive` 改名 `project delete`** (O2 resolved — honest naming，PRD §11.1 同步更新) + **`project move` 改 `session move <id> --to=<pid>`** (O3 resolved — noun=verb subject grammar，PRD §11.1 同步更新)。详 §2 + §1.4 + §1.5 + §9。
 
 ---
 
@@ -24,17 +24,19 @@
 
 ### 1.1 11 个 subcommand 清单
 
+> **2026-05-20 PM update**: rows 6 (session move 新增) / 8 (project move retired→session move) / 9 (project archive renamed→project delete) reflect O2+O3 resolutions。Row 1 atomic-ish 改 atomic via SQLite transaction (O1 resolved)。**总数仍 11**（lose project.move + add session.move + rename project.archive→delete）。
+
 | # | CLI surface | trait method | Origin? | socket route | Notes |
 |---|---|---|---|---|---|
-| 1 | `session new "<task>" [--project=X] [--llm=...] [--supervisor=Y] [--reason=Z]` | `create_session` + `send_message`（socket 内组合）| ✓ | `session.new` | atomic-ish: SQL #1 fail → no SQL #2；SQL #2 fail → SQL #1 已 commit（接受小 race，不 trait-level atomic） |
+| 1 | `session new "<task>" [--project=X] [--llm=...] [--supervisor=Y] [--reason=Z]` | `create_session` + `send_message`（socket handler 内 SQLite transaction wrap）| ✓ | `session.new` | **Atomic**: BEGIN → create_session → send_message → COMMIT；任一 SQL 失败 → ROLLBACK + exit 5 runner_error；无 partial state (O1 resolved) |
 | 2 | `session btw <id> "<q>" [--supervisor=Y]` | (none — runner-only) | ✓ (audit-only) | `session.btw` | **skip DB persist**；socket emit `IpcCommand::UserMessage` with content=`/btw <q>`；no Origin SQL write |
 | 3 | `session stop <id> [--reason=Z]` | (manager-only) | (audit-only) | `session.stop` | emit `IpcCommand::Abort`（**not** Shutdown）；bridge 留活下次 send 可继续 |
 | 4 | `session archive <id> [--supervisor=Y] [--reason=Z]` | `archive_session` | ✓ | `session.archive` | thin wrapper |
 | 5 | `session restore <id> [--supervisor=Y] [--reason=Z]` | `unarchive_session` | ✓ | `session.restore` | thin wrapper；CLI 名 PRD = `restore`，trait 名 = `unarchive`（[G1 playbook 已记](./B4-cli-bg-artifact.md#running-notes--gotchas)）|
-| 6 | `project create "<name>" [--description=...] [--supervisor=Y]` | `create_project` | ✓ | `project.create` | thin wrapper |
-| 7 | `project list` | `list_projects` | — | `project.list` | thin wrapper；返 NDJSON |
-| 8 | `project move <session-id> [--to=<project-id>] [--supervisor=Y]` | `assign_session_to_project` | ✓ | `project.move` | no `--to` = 拆出 project (project_id=None) |
-| 9 | `project archive <project-id> [--supervisor=Y] [--reason=Z]` | `delete_project` | ✓ | `project.archive` | v0.5 archive = delete；FK CASCADE 留 sessions intact (per [api.rs:268-270](../../core/src/api.rs)) |
+| 6 | `session move <id> [--to=<project-id>] [--supervisor=Y]` | `assign_session_to_project` | ✓ | `session.move` | **(O3 resolved)** noun=verb subject (session 是 move 的主语，不是 project)；no `--to` = 拆出 project (project_id=None)；PRD §11.1 同步改 |
+| 7 | `project create "<name>" [--description=...] [--supervisor=Y]` | `create_project` | ✓ | `project.create` | thin wrapper |
+| 8 | `project list` | `list_projects` | — | (direct SQLite read, no socket) | thin wrapper；返 NDJSON；mirror sessions list 路径 |
+| 9 | `project delete <project-id> [--supervisor=Y] [--reason=Z]` | `delete_project` | ✓ | `project.delete` | **(O2 resolved)** v0.5 rename from `project archive` → `project delete`；honest naming (实际 SET NULL detach + DELETE)；FK CASCADE 保 sessions intact (per [api.rs:268-270](../../core/src/api.rs))；v0.6+ 再 ship 真 `project archive` reversible 语义；PRD §11.1 同步改 |
 | 10 | `llm list` | (SQLite read prefs) | — | (direct DB read, no socket) | 读 `prefs.llm_list` pref；空 → empty NDJSON；不报错 |
 | 11 | `llm set <session-id> <llm-display-name>` | `set_session_llm` + (optional) bridge emit | — (no audit per existing pattern) | `llm.set` | DB write SessionBrief；如 bridge alive emit `IpcCommand::SetLlm`；by-name lookup against cached list |
 
@@ -151,6 +153,54 @@ fn map_galley_err(request_id: Option<String>, err: GalleyError) -> SocketRespons
 
 §3 各 T 内 mention 复用。
 
+### 1.9 `session new` SQLite transaction wrap 实现选择（O1 resolved）
+
+`session.new` socket handler 需 atomic 把 create_session + send_message 两步 SQL 绑成一个 transaction。**两种实现路径**：
+
+**Option A · 加 `*_in_tx` trait method 变体**
+
+```rust
+// api.rs · 新 method
+async fn create_session_in_tx<'c>(
+    &self,
+    tx: &mut sqlx::Transaction<'c, sqlx::Sqlite>,
+    input: CreateSessionInput,
+    origin: Origin,
+) -> Result<SessionBrief>;
+
+async fn send_message_in_tx<'c>(
+    &self,
+    tx: &mut sqlx::Transaction<'c, sqlx::Sqlite>,
+    session_id: SessionId,
+    content: String,
+    origin: Origin,
+) -> Result<MessageBrief>;
+```
+
+socket handler:
+```rust
+let mut tx = galley.pool().begin().await.map_err(/* db_unavailable */)?;
+let session = galley.create_session_in_tx(&mut tx, input, origin.clone()).await
+    .map_err(|e| { /* tx auto-rollback on drop */ map_galley_err(...) })?;
+let msg = galley.send_message_in_tx(&mut tx, session.id.clone(), task, origin).await?;
+tx.commit().await.map_err(/* internal */)?;
+```
+
+**Option B · socket handler 内 inline SQL (no trait change)**
+
+socket handler 内直 sqlx query call，不走 GalleyApi trait。Pro: 0 trait surface change；Con: 复制 200-300 行 SQL/validation 代码，跟既有 `create_session` / `send_message` impl 漂移风险高。
+
+**M1 决策 · Option A**：trait surface 加 2 method 是有代价但合理（既有 owned-pool method 保留给 GUI Tauri command 路径用，不破坏 B3 调用方）；inline SQL 复制是反 DRY，长期 maintenance 成本高。
+
+**实施 step (T1.1 prereq 内)**：
+1. `SqliteGalley` 加 `pool()` accessor return `&SqlitePool` (already exists or trivial getter)
+2. `api.rs` trait 加 2 `*_in_tx` method default impl `unimplemented!()` 是反 pattern → 设 trait 强制实现
+3. `SqliteGalley` impl 把既有 `create_session` body 提取到 helper `do_create_session(executor: impl SqliteExecutor)`，两 method (`create_session` 走 pool / `create_session_in_tx` 走 tx) 都调 helper
+4. `send_message` 同 pattern 拆 `do_send_message`
+5. 既有 cargo test 不应 break（拆 helper 是纯 refactor）
+
+**Verify before T1.1 实施**: SQLx version supports `Transaction<'c, Sqlite>` borrow pattern? (verify `core/Cargo.toml` sqlx feature flags). 0.8 已 support，B1 已用 0.8。
+
 ---
 
 ## 2. Commit shape · 4-commit M1
@@ -218,7 +268,7 @@ git commit -m "Docs: B4 M1 sub-plan — CLI write commands + commit shape decisi
 
 JC review pass 后进 T1.1。
 
-### T1.1 · M1.1 prereq commit · GalleyError::RunnerError + helpers
+### T1.1 · M1.1 prereq commit · GalleyError::RunnerError + helpers + tx-aware trait + PRD §11.1 rename
 
 **Files**:
 - `core/src/error.rs`: 加 `RunnerError { message: String }` variant + Display impl + From `RunnerManagerError`-ish if needed
@@ -229,10 +279,21 @@ JC review pass 后进 T1.1。
   - `fn origin_from_args(supervisor: Option<String>, reason: Option<String>) -> Origin`
   - `fn map_galley_err(request_id: Option<String>, err: GalleyError) -> SocketResponse` （含 RunnerError 新 arm）
   - 把 `dispatch_session_send` body 内 inline error mapping 改用 `map_galley_err`（重构对齐 B2 pattern）
+- `core/src/api.rs` (O1 resolved · tx-aware trait method 加):
+  - `create_session_in_tx<'c>(&self, tx: &mut Transaction<'c, Sqlite>, input: CreateSessionInput, origin: Origin) -> Result<SessionBrief>`
+  - `send_message_in_tx<'c>(&self, tx: &mut Transaction<'c, Sqlite>, id: SessionId, content: String, origin: Origin) -> Result<MessageBrief>`
+  - 既有 `create_session` / `send_message` (owned pool) body 拆 helper (`do_create_session(executor)` / `do_send_message(executor)`) 内部复用，trait surface owned-pool method 保留 (GUI Tauri command path 不变)
+- `core/src/db.rs` (or wherever `SqliteGalley` impl lives): impl 新 2 trait method + 拆 helper
+- `core/src/db.rs`: `pool() -> &SqlitePool` accessor (already exists per B1 M5 or add trivial getter)
+- `core/src/api/prefs.rs` (NEW or in `api.rs` extension): `get_pref<T: DeserializeOwned>(&self, key: &str) -> Result<Option<T>>` method (for T1.8 `llm list` usage)
+- `docs/PRD.md §11.1` (O2 + O3 resolved): rename `galley project move` → `galley session move <id> --to=<project-id>` + rename `galley project archive` → `galley project delete` + 加 "v0.6+ 再 ship 真 `project archive` (reversible)" 注脚
 
-**Tests**: `cargo test` 全过（既有 test 不应受影响 — 单纯 variant 加 + helper 提取）。
+**Tests**:
+- `cargo test --workspace` 全过（既有 test 不应受影响 — 拆 helper 是纯 refactor）
+- 新加 unit test 验证 in-tx variant: open tx → 调 create_session_in_tx → 调 send_message_in_tx → COMMIT → verify rows 都在
+- 新加 unit test 验证 rollback: open tx → 调 create_session_in_tx → drop tx (auto rollback) → verify row 不在
 
-**Commit**: `Refactor: B4 M1 prereq — GalleyError::RunnerError + socket helpers`
+**Commit**: `Refactor: B4 M1 prereq — GalleyError::RunnerError + socket helpers + tx-aware trait variants + PRD §11.1 rename (O2+O3)`
 
 ### T1.2 · `session new` 
 
@@ -253,18 +314,23 @@ struct SessionNewArgs {
 }
 ```
 
-handler 顺序：
+handler 顺序（O1 resolved 2026-05-20 PM: SQLite transaction wrap）：
 1. parse args → trim task；empty after trim → exit 2 invalid_args
 2. 如 `llm_name.is_some()`: read prefs llm_list cache，find index by name；not found → exit 2；cache empty → exit 4
 3. construct CreateSessionInput { id: mint_id(), title: "新对话" (server-side derive 第一次 turn 后)，project_id, llm_index, llm_display_name }
-4. `galley.create_session(input, origin)` → SessionBrief
-5. `galley.send_message(brief.id.clone(), task, origin)` → MessageBrief (持久化首条 message)
-6. `manager.send_command(&brief.id.0, &IpcCommand::UserMessage{text:task, images:vec![]})` (best-effort dispatch)
-7. 返 `{session: brief, message: msg_brief, dispatch: "dispatched"|"persisted_only"}`
+4. **BEGIN TRANSACTION** (SQLx `pool.begin().await?` 返 `Transaction`)
+5. `galley.create_session_in_tx(&mut tx, input, origin)` → SessionBrief（trait 加 `*_in_tx` 变体 OR socket handler 内手 inline SQL；详 §1.9）
+6. `galley.send_message_in_tx(&mut tx, brief.id.clone(), task, origin)` → MessageBrief
+7. **COMMIT** (`tx.commit().await?`)
+8. 任意 step 4-7 失败 → 自动 ROLLBACK + map_galley_err → 适当 exit code (5 runner_error if internal SQL fail; 2/3/4 if validation fail)
+9. `manager.send_command(&brief.id.0, &IpcCommand::UserMessage{text:task, images:vec![]})` (best-effort dispatch；fail 不 rollback — DB 已 commit，bridge dispatch 仅 best-effort)
+10. 返 `{session: brief, message: msg_brief, dispatch: "dispatched"|"persisted_only"}` exit 0
 
 **id minting**: socket handler 用 `format!("s-{}", ulid::Ulid::new())` (already used in B3 M4 create_session caller path — verify dependency available in core/Cargo.toml)；如 ulid crate 未 add → 用 `uuid::Uuid::new_v4()`（已是 deps）。
 
-**Atomicity trade-off**: step 4 succeeds + step 5 fails = session exists 但无 first message (用户能在 GUI 看到空 session)。**Accept**: 极少触发 (send_message fail 通常是 DB 已 unavailable 整体 fail)；CLI 返 dispatch="message_persist_failed" 而非 exit error，agent 端可决定 retry。R3 in §4.
+**Atomicity guarantee (O1 resolved)**: SQLite transaction wrap eliminates partial state。Reject #2 仍 stands —— **不**加新 trait method `create_session_with_first_message` (trait + test 矩阵 cost)；改在 socket handler 内 inline tx 控制 (`pool.begin()` + 复用既有 trait method **如果它们接受 `&mut Transaction` 而非 owned `&self`**)。**Trait 修改成本**：need to add `*_in_tx` 变体 of `create_session` + `send_message` (2 method)，复用既有 body 但接 `&mut Transaction<Sqlite>`. **Verify before T1.2**: SqliteGalley impl 当前是否所有 SQL 走 owned pool? 如是，加 in-tx 变体；如已用 connection-borrow 模式，更简单 reuse. 详 §1.9.
+
+**Tx open cost**: SQLite WAL `BEGIN IMMEDIATE` ~1ms 本地，可接受。不用 `BEGIN DEFERRED` (read-then-write race 不在 session new 路径，create + insert 是纯 write)。
 
 CLI:
 ```rust
@@ -343,21 +409,45 @@ Tauri emit name `session-archived-external` mirror B2 `user-message-persisted` n
 
 `session restore` 同 pattern 走 `unarchive_session` + emit `session-unarchived-external`.
 
-### T1.6 · `project create / list / move / archive`
+### T1.6 · `session move` (O3 resolved, 原 T1.6 project move 重定位)
 
-4 socket handler，3 写 + 1 读（list）。
+socket arg：
+```rust
+struct SessionMoveArgs {
+    session_id: String,
+    #[serde(default)]
+    to: Option<String>,  // None = detach from any project
+    #[serde(default)]
+    supervisor: Option<String>,
+    #[serde(default)]
+    reason: Option<String>,
+}
+```
 
-**`project list`**：可走 SQLite read 直接（无需 socket），保持跟 `sessions list` / `llm list` 一致。但 CLI 是单一可执行二进制，无需 GalleyApi 实例化两次 —— **决策**：M1 走 socket（per [B4-I4](./B4-cli-bg-artifact.md#phase-invariants--b4-特有的硬规则) "write 必须走 socket"）+ read-only 命令保留直 SQLite。**`project list` 是 read** → 直 SQLite，跟 B1 inventory 命令一组。
+handler:
+1. parse；validate session exists → not found exit 3
+2. 如 `to.is_some()`: validate project exists → not found exit 2 (FK violation 路径 — `assign_session_to_project` impl 已 return InvalidArgs per [api.rs:165-166](../../core/src/api.rs))
+3. `galley.assign_session_to_project(SessionId(session_id), to, origin)` → SessionBrief
+4. emit Tauri event `session-moved-external` (payload {sessionId, newProjectId})
+5. 返 `{session: brief}` exit 0
 
-修正决策：`project list` 走直 SQLite (CLI subcommand 内开 SqliteGalley + 调 `list_projects` trait method)，**不**经 socket。Mirror `sessions list` pattern。
+**Naming rationale (O3 resolved 2026-05-20 PM)**: PRD §11.2 #5 「`galley <noun> <verb>`，noun 是 verb subject」。`move` 的 subject 是 session 不是 project（projects 不动，sessions 在 projects 间移动）。原 PRD §11.1 写「`galley project move`」违反自家 grammar 规则。**修法**：PRD §11.1 同步更新（M1.1 prereq commit 顺便改）+ CLI surface `session move`，agent-api §5.X 不再需要补「subject is session」说明（直接对齐）。
 
-**`project create`**：socket handler 调 `create_project`。返 `ProjectBrief`。Emit `project-created-external`.
+### T1.7 · `project create / list / delete` (O2 resolved, 原 T1.6 4-cmd 改 3-cmd)
 
-**`project move`**：socket handler 调 `assign_session_to_project(session_id, project_id, origin)`。`--to=` flag 缺省 = `project_id = None`（拆出 project）。Emit `session-moved-external` （payload 含 session_id + new project_id）。
+3 subcommand: 1 写 (create) + 1 读 (list, no socket) + 1 删 (delete)。
 
-**`project archive`**：socket handler 调 `delete_project`。Emit `project-deleted-external`. CLI surface 命名 `archive` 但 trait method 是 delete —— sub-plan 内决策，**不**为 CLI 命名加新 trait method（避免 schema 漂移），CLI doc 内说明 "archive 在 v0.5 = 永久删除；sessions 自动脱钩到 ungrouped"（per [api.rs:268-270](../../core/src/api.rs) FK SET NULL）。
+**`project list`**：CLI subcommand 直走 SQLite (no socket)，mirror `sessions list` / `llm list` pattern。CLI subcommand 内开 SqliteGalley + 调 `list_projects` trait method。NDJSON output 一行一 ProjectBrief。
 
-### T1.7 · `llm list`
+**`project create`**：socket handler 调 `create_project(input, origin)` → ProjectBrief。Emit Tauri event `project-created-external`. Args `{name, description, supervisor, reason}`，name trim empty → exit 2 invalid_args (per [api.rs:248-249](../../core/src/api.rs))。
+
+**`project delete`** (O2 resolved · was `project archive`)：socket handler 调 `delete_project(id, origin)`. FK CASCADE SET NULL 自动把 child sessions 拆到 ungrouped (保 sessions 不丢)。Emit Tauri event `project-deleted-external` (payload {projectId, detachedSessions: count})。Response: `{deleted: true, detachedSessions: count}` 让 agent 知道副作用。Exit 3 if not_found。
+
+**Naming rationale (O2 resolved 2026-05-20 PM)**: 原 PRD `project archive` 在 v0.5 实际是 `delete_project` (FK SET NULL + 行删除)。「archive」一词暗示 reversible hide，跟实际 destructive delete 不符——naming 撒谎。**修法**：v0.5 直接叫 `project delete` (honest)；v0.6+ 真 archive 落地时再 ship `project archive` 带 reversible 语义（避免现在的 archive→delete 误导成为 semantic debt）。PRD §11.1 同步改 (M1.1 prereq commit)。
+
+**Note for SOP (M4)**：destructive 操作前 agent confirm + show detachedSessions preview 是 SOP-level 责任，不在 CLI surface 加 flag（O2 决策 explicit）。`project delete` 名字诚实就够了。
+
+### T1.8 · `llm list`
 
 CLI subcommand 直走 SQLite (no socket)：
 
@@ -376,7 +466,7 @@ Cache shape (from runtime.ts:686 + hydrate.ts:75): `Vec<{index: u32, name: Strin
 
 **Verify**：当前 `SqliteGalley` 是否已有 generic prefs read？grep 一下，没有就在 M1.1 prereq commit 加上。
 
-### T1.8 · `llm set`
+### T1.9 · `llm set`
 
 socket arg:
 ```rust
@@ -395,19 +485,22 @@ handler:
 
 **No Origin**：mirror existing `set_session_llm` trait signature (无 origin per [api.rs:184-189](../../core/src/api.rs))。
 
-### T1.9 · CLI subcommand 注册 (clap)
+### T1.10 · CLI subcommand 注册 (clap)
 
-`cli/src/main.rs` 加：
+`cli/src/main.rs` 加（reflects O2 rename + O3 session move 重定位 + transaction wrap on session new）：
 
 ```rust
 #[derive(Subcommand, Debug)]
 enum SessionCmd {
-    // ...existing...
+    // ...existing (Send/Watch/Brief/Show)...
     New { task: String, #[arg(long)] project: Option<String>, #[arg(long)] llm: Option<String>, #[arg(long)] supervisor: Option<String>, #[arg(long)] reason: Option<String> },
     Btw { id: String, question: String, #[arg(long)] supervisor: Option<String>, #[arg(long)] reason: Option<String> },
     Stop { id: String, #[arg(long)] reason: Option<String>, #[arg(long)] supervisor: Option<String> },
     Archive { id: String, #[arg(long)] supervisor: Option<String>, #[arg(long)] reason: Option<String> },
     Restore { id: String, #[arg(long)] supervisor: Option<String>, #[arg(long)] reason: Option<String> },
+    /// Move a session into / out of a project. `--to=<project-id>` to attach;
+    /// omit `--to` to detach from any project. (O3 resolved: noun=subject.)
+    Move { id: String, #[arg(long)] to: Option<String>, #[arg(long)] supervisor: Option<String>, #[arg(long)] reason: Option<String> },
 }
 
 #[derive(Subcommand, Debug)]
@@ -423,8 +516,10 @@ enum Command {
 enum ProjectCmd {
     Create { name: String, #[arg(long)] description: Option<String>, #[arg(long)] supervisor: Option<String> },
     List,
-    Move { session_id: String, #[arg(long)] to: Option<String>, #[arg(long)] supervisor: Option<String> },
-    Archive { project_id: String, #[arg(long)] supervisor: Option<String>, #[arg(long)] reason: Option<String> },
+    /// Permanently delete a project. Child sessions auto-detach to ungrouped
+    /// (FK SET NULL). v0.5: this is destructive. v0.6+ will ship a separate
+    /// `archive` command with reversible semantics. (O2 resolved.)
+    Delete { project_id: String, #[arg(long)] supervisor: Option<String>, #[arg(long)] reason: Option<String> },
 }
 
 #[derive(Subcommand, Debug)]
@@ -434,7 +529,9 @@ enum LlmCmd {
 }
 ```
 
-### T1.10 · agent-api.md §5.7-§5.17 (M1.4 commit)
+**Note**: 旧 `ProjectCmd::Move` 不存在（已迁 SessionCmd::Move per O3）；旧 `ProjectCmd::Archive` 改名 `Delete` per O2。clap 这两处变化 + PRD §11.1 同步更新 (M1.1 prereq commit 内) 形成 single source of truth。
+
+### T1.11 · agent-api.md §5.7-§5.17 (M1.4 commit)
 
 每命令一段，mirror §5.4-§5.6 format：
 - Bash example with verbatim CLI invocation
@@ -443,40 +540,57 @@ enum LlmCmd {
 - Error codes table（list which `error` discriminants this command can return + which exit code）
 - Origin behavior block (1-2 sentences)
 
-§5.7 `session new`、§5.8 `session btw`、§5.9 `session stop`、§5.10 `session archive`、§5.11 `session restore`、§5.12 `project create`、§5.13 `project list`、§5.14 `project move`、§5.15 `project archive`、§5.16 `llm list`、§5.17 `llm set`.
+| §  | command | 备注 |
+|---|---|---|
+| §5.7 | `session new` | atomic transaction; O1 path |
+| §5.8 | `session btw` | transient; not persisted; runner-only |
+| §5.9 | `session stop` | Abort 不 Shutdown; idempotent |
+| §5.10 | `session archive` | thin wrapper |
+| §5.11 | `session restore` | thin wrapper (`unarchive_session`) |
+| §5.12 | `session move` | O3 resolved; subject=session |
+| §5.13 | `project create` | thin wrapper |
+| §5.14 | `project list` | direct SQLite read |
+| §5.15 | `project delete` | O2 resolved; was `project archive` in earlier drafts |
+| §5.16 | `llm list` | direct SQLite read (prefs cache) |
+| §5.17 | `llm set` | DB write + best-effort bridge IPC |
 
 §3 Exit codes 表加 row 5 = `runner_error`.
 
 §1 stability section bullet：「`error` discriminants stable」加 `runner_error` 进 enum 列表。
 
-### T1.11 · Integration tests (M1.4 commit)
+### T1.12 · Integration tests (M1.4 commit)
 
 新 test file `cli/tests/m1_session_writes.rs`、`m1_project_writes.rs`、`m1_llm_commands.rs`. Mirror existing test style (`cli/tests/session_send.rs` etc)：
 
 - Setup: tempdir + GALLEY_DB_PATH override + spawn socket server in test process
 - Per command: 1 happy + 1 error path
 - Examples:
-  - `session new "task"` → session row + first message row exists in DB
-  - `session new "task" --llm=nonexistent` → exit 2 invalid_args
+  - `session new "task"` → session row + first message row exists in DB (verify both committed atomically)
+  - `session new "task" --llm=nonexistent` → exit 2 invalid_args + verify **no** session row created (transaction rolled back; T1.2 atomicity invariant)
   - `session btw <id> "q"` (no bridge alive) → exit 5 runner_error
   - `session stop <id>` (no bridge alive) → exit 0 dispatch=already_stopped
   - `session archive <id>` → SessionBrief status=archived returned
+  - `session move <sid> --to=<pid>` → session row project_id mutated (O3)
+  - `session move <sid>` (no --to) → session row project_id null (detach)
   - `project create "name"` → ProjectBrief returned
   - `project list` → NDJSON list
-  - `project move <sid> --to=<pid>` → session row project_id mutated
-  - `project archive <pid>` → row deleted; sessions detached
+  - `project delete <pid>` → row deleted; sessions detached (count returned) (O2)
   - `llm list` (empty cache) → empty stdout, exit 0
   - `llm set <sid> "<name>"` (cache empty) → exit 2
 
-Target: 15-22 new tests total。Cargo test should pass 全过。
+Target: 15-22 new tests total。Cargo test should pass 全过。**Atomicity invariant test** (session new rollback verification) is load-bearing for O1 resolution。
 
-### T1.12 · M1 commit + dogfood
+### T1.13 · M1 commit + dogfood
 
 ```
-M1.1 commit: "Refactor: B4 M1 prereq — GalleyError::RunnerError + socket helpers"
-M1.2 commit: "Feat: B4 M1 — session write commands (new/btw/stop/archive/restore)"
+M1.1 commit: "Refactor: B4 M1 prereq — GalleyError::RunnerError + socket helpers + tx-aware trait variants + PRD §11.1 rename"
+  → 含 PRD §11.1 改名（O2 project archive→delete + O3 project move→session move）+ GalleyError::RunnerError variant + map_galley_err helper + origin_from_args helper + create_session_in_tx / send_message_in_tx trait method
+M1.2 commit: "Feat: B4 M1 — session write commands (new/btw/stop/archive/restore/move)"
+  → 6 subcommand (new 走 tx wrap atomic; move 是 O3 新加) + GUI ipc-handlers 加 4 listener (session-archived-external / session-unarchived-external / session-moved-external + future session-updated-external for llm.set)
 M1.3 commit: "Feat: B4 M1 — project + llm write commands"
+  → project: create/list/delete (3 cmd per O2，lost move per O3) + llm: list/set (2 cmd) + GUI ipc-handlers 加 2 listener (project-created-external / project-deleted-external)
 M1.4 commit: "Docs+Test: B4 M1 — agent-api schemas + CLI integration tests"
+  → agent-api §5.7-§5.17 11 段 + §3 exit code 5 row + §1 stable error discriminants 更新 + cli/tests/m1_*.rs 15-22 test
 ```
 
 Dogfood 1-2 day per §6.
@@ -485,20 +599,23 @@ Dogfood 1-2 day per §6.
 
 ## 4. Risk register
 
+> **2026-05-20 PM update**：R1 / R6 / R7 由 O1 / O3 / O2 resolution 消除或大幅 mitigated。修订后保留 active risks。
+
 | ID | Risk | Mitigation | Severity |
 |---|---|---|---|
-| **R1** | **session new atomicity** — create_session succeed + send_message fail = orphan empty session in DB；用户 GUI 见空 session 摸不着头脑 | (a) socket handler 内 send_message fail 时返 `{dispatch: "message_persist_failed", session: brief, error: ...}` exit 0；agent 端可选 retry or delete (b) 极少触发（send_message fail 通常 = DB unavailable，整 socket 都 down）(c) GUI MainView 对空 session 已有 graceful render (empty state) | Medium |
+| ~~R1~~ | ~~session new atomicity (orphan empty session)~~ | **CLOSED (O1 resolved)**: SQLite transaction wrap (T1.2) 保证 create_session + send_message atomic 或全 ROLLBACK。无 partial state；CLI test `session new "task" --llm=nonexistent` 验证 invalid_args 时 zero session row created | ~~Medium~~ → closed |
 | **R2** | **session btw no-bridge fail mode** — btw 需要 runner alive，但 CLI 无能力 spawn bridge（spawn 在 GUI 用户手 activate 时触发）；agent 调 btw 时 bridge 可能已被 LRU evict | exit 5 runner_error + message "no live bridge; activate session in GUI first" (SOP doc 教 agent 流程)；future B4 M2/M3 后 GUI 在 background 跑可降低 evict 率 | Medium |
 | **R3** | **session stop semantics 跟用户预期不符** — 用户期待「停止 + bridge 死」实际是「停止 turn + bridge 活」；SOP 文档没写清 agent 会困惑 | M4 supervisor SOP 文档显式说明：「`stop` = abort current turn，bridge 留活；要真退请 `archive`」；archive 走 status=archived bridge LRU 自然 evict | Medium |
 | **R4** | **llm list cache empty** — 用户从未 warmup 过 (例：刚 onboard 没起过 session) → cache 空 → `llm list` 返 empty → agent SOP 困惑 | exit 0 + empty stdout (not error；空集合是合法 read 结果)；SOP 文档说 "如空请到 GUI Settings → Runtime warmup 或起一次 session"；M4 SOP scenarios 内含 "first-time setup" 步骤 | Low |
-| **R5** | **Tauri emit `session-archived-external` 等新事件 GUI 端无 listener** —— 沿用 B2 user-message-persisted 后接 listener pattern，但 M1 写 4 个新 emit (`session-archived-external` / `session-unarchived-external` / `project-created-external` / `project-deleted-external` / `session-moved-external`)，GUI ipc-handlers 漏挂 → GUI sidebar 不实时更新 | M1.2 / M1.3 commit 内必须**同 commit 加 GUI listener**（gui/src/lib/ipc-handlers.ts）。listener body = 调 sessionsStore / runtimeStore 既有 action mirror cli action (mirror B2 appendUserTurnExternal pattern)。V8 dogfood gate 强 check 5 emit 全有 listener | Medium |
-| **R6** | **project move CLI 命名歧义** —— PRD 写 "project move"，自然语义可解读为「移动 project 自身」(不存在的操作) vs「移动 session 到 project」(实际操作) | sub-plan 选「移动 session」语义；CLI surface `project move <session-id> [--to=<project-id>]`；agent-api §5.14 文档段开头明确 "Moves a session into (or out of) a project — operates on the session, not the project itself"；M4 SOP scenarios 重点演示一遍 | Low |
-| **R7** | **project archive ≠ delete 语义混淆** —— v0.5 archive 等于 delete (FK CASCADE SET NULL，sessions 不消失只解组)；SOP / agent 误以为是 hide 可恢复 → 用户数据感知混淆 | (a) CLI `project archive` 返 `{archived: true, detachedSessions: count}` 让 agent 明确感知 (b) agent-api §5.15 文档段大字写 "v0.5: archive is permanent delete; sessions remain ungrouped. v0.6+ will introduce true archive (recoverable)." (c) M4 SOP scenarios "destructive ops confirm" 章节单独 cover | Medium |
+| **R5** | **Tauri emit `session-archived-external` 等新事件 GUI 端无 listener** —— 沿用 B2 user-message-persisted 后接 listener pattern，M1 写 5 个新 emit (`session-archived-external` / `session-unarchived-external` / `session-moved-external` / `project-created-external` / `project-deleted-external`)，GUI ipc-handlers 漏挂 → GUI sidebar 不实时更新 | M1.2 / M1.3 commit 内必须**同 commit 加 GUI listener**（gui/src/lib/ipc-handlers.ts）。listener body = 调 sessionsStore / runtimeStore 既有 action mirror cli action (mirror B2 appendUserTurnExternal pattern)。V8 dogfood gate 强 check 5 emit 全有 listener | Medium |
+| ~~R6~~ | ~~project move CLI 命名歧义~~ | **CLOSED (O3 resolved)**: rename CLI surface 到 `session move <id> --to=<pid>` 直接消除歧义。subject=session 跟 PRD §11.2 #5 grammar rule 对齐。PRD §11.1 同步更新 | ~~Low~~ → closed |
+| ~~R7~~ | ~~project archive ≠ delete 语义混淆~~ | **CLOSED (O2 resolved)**: rename CLI surface 到 `project delete`，naming honest matches actual behavior (FK SET NULL + DELETE)。v0.6+ 真 archive 落地时 ship 新 `project archive` 带 reversible 语义。agent-api §5.15 文档段 prominent 说 "v0.6+ will introduce true `project archive` (reversible) — current `project delete` is destructive but child sessions auto-detach (not lost)." | ~~Medium~~ → closed |
 | **R8** | **GalleyError 加 RunnerError variant 破坏 exhaustive match** — 全 codebase 内 `match GalleyError` 凡 exhaustive 的都需要加 arm；漏一处 = TS strict / cargo error | M1.1 prereq commit 内 cargo check 强 enforce；`#[non_exhaustive]` attr **不**加 (内部 crate 不需要 future-proofing；exhaustive match 是 feature) | Low |
 | **R9** | **CLI exit code 5 引入但 CI 没测** — 既存 CLI tests 假设 0-4，加 5 后 SOP 测试可能没覆盖 runner_error path | M1.4 integration tests 必有至少 2 个 exit 5 case (session btw no-bridge + llm set bridge-fail simulated) | Low |
 | **R10** | **llm by-name lookup 大小写敏感** — `--llm=GLM-4.5-X` vs cache 里 `glm-4.5-x` ↓ exit 2 invalid_args；用户体感差 | M1 实施：socket handler 内做 case-insensitive compare (`.eq_ignore_ascii_case(name)`)；agent-api §5.7 / §5.17 doc 写 "case-insensitive match" | Low |
 | **R11** | **session new id 生成 race** — 极短时间内多 supervisor 调 `session new` ulid/uuid 仍可能（理论）冲突 → create_session 报 invalid_args (PRIMARY KEY) | (a) socket handler 改 retry 1 次重 mint id (b) 实际 ulid 时间戳 80 bit + 随机 48 bit，碰撞概率小于 race condition；M1 内**不**实现 retry，留 R 记 | Low |
 | **R12** | **session btw `--reason=` 不持久化但 surface 接** - sub-plan 决策 btw 不写 DB，但 CLI 仍接 supervisor/reason flag，用户期望存却没存 | (a) M7 GUI 行动日志渲染时通过 Tauri event 接收 + render (不依赖 DB) (b) agent-api §5.8 doc 显式说 "session btw 的 supervisor/reason 仅用于实时日志；不持久化；session 重启后 /btw 历史整段丢" | Low |
+| **R13 NEW** | **tx-aware trait method 加 (`create_session_in_tx` / `send_message_in_tx`) 对 B3 GUI 调用 caller 风险** —— 既有 owned-pool method `create_session` / `send_message` 不改 signature，但底层若都 delegate 到 helper (`do_create_session` 接 `SqliteExecutor`)，helper 改 bug 可能同时影响 GUI Tauri command path 跟 CLI socket path | T1.1 implementation: refactor 拆 helper 时跑全 既有 cargo test（不只新加 test）；GUI dogfood path 在 V5 / cluster 1-2 重测；refactor commit 独立（M1.1 内） | Low |
 
 ---
 
@@ -526,30 +643,35 @@ galley llm list         # → exit 0, NDJSON (might be empty)
 galley session new "test"  # → exit 4 db_unavailable
 
 # With Core (起 GUI / Tauri dev mode)
-galley session new "test from CLI"  # → exit 0, JSON {session, message, dispatch}
+galley session new "test from CLI"   # → exit 0, JSON {session, message, dispatch}
 galley sessions list                 # → 看到 "test from CLI"
 galley session brief <id-from-above> # → SessionBrief
 galley session btw <id> "side q"     # → exit 0 or exit 5 (depending bridge alive)
 galley session stop <id>             # → exit 0, {dispatch: ...}
 galley session archive <id>          # → exit 0; GUI sidebar 该 session 消失
 galley session restore <id>          # → exit 0; GUI sidebar 该 session 回来
+galley session move <sid> --to=<pid> # → exit 0; GUI 看 session 进 project (O3)
+galley session move <sid>            # → exit 0; session 拆出 project (no --to)
 galley project create "test proj"    # → exit 0, ProjectBrief
 galley project list                  # → NDJSON 含 "test proj"
-galley project move <sid> --to=<pid> # → exit 0; GUI 看 session 进 project
-galley project archive <pid>         # → exit 0; sessions detach to ungrouped
+galley project delete <pid>          # → exit 0; sessions detach to ungrouped (O2)
 galley llm set <sid> "glm-4.5-x"     # → exit 0 or exit 2 (cache empty)
 ```
 
-### V4 · Atomicity / idempotency
-- `session new` send_message fail simulation (临时 corrupt DB 或 mock) → 返 `dispatch: message_persist_failed` + exit 0
+### V4 · Atomicity / idempotency (O1 resolved)
+- `session new "task" --llm=nonexistent-llm` → exit 2 invalid_args **AND** `sessions list` 不见此 session (transaction rolled back; atomicity 验证)
+- `session new` 模拟 send_message tier fail (临时 inject `DROP TABLE messages` via SQL fixture or mock send_message body) → exit 5 runner_error **AND** `sessions list` 不见此 session (full rollback)
 - `session stop` × 3 连续 → 第 1 次 `abort_sent`，2-3 次 `already_stopped`
 - `session archive <id>` × 2 → 第 2 次仍 ok (idempotent)
+- `session move <id> --to=<pid>` × 2 → 第 2 次 ok (idempotent)
+- `project delete <pid>` 然后 `sessions list --project=<pid>` → empty (sessions detached but not deleted)
 
 ### V5 · GUI 实时性
 - CLI `session new` → GUI sidebar 1s 内出现新 session
 - CLI `session archive` → GUI sidebar 1s 内消失
+- CLI `session move <sid> --to=<pid>` → GUI sidebar 旧位置消失、新 project 下出现 (O3)
 - CLI `project create` → GUI sidebar PROJECTS section 1s 内出现
-- CLI `project move` → GUI sidebar 旧位置消失、新 project 下出现
+- CLI `project delete <pid>` → GUI sidebar PROJECTS 消失 + 原 sessions 跳到 ungrouped (O2)
 - CLI `llm set` 在 alive bridge 期间 → GUI MainView LLM popover 1s 内显示新名
 
 ### V6 · Exit code 完整性
@@ -568,26 +690,32 @@ galley llm set <sid> "glm-4.5-x"     # → exit 0 or exit 2 (cache empty)
 
 ## 6. Dogfood scenarios
 
-### Cluster 1 · session new from CLI
+### Cluster 1 · session new from CLI (O1 atomicity 重点)
 - [ ] `galley session new "fix auth bug"` → GUI sidebar 出现 + first message 已 dispatch（看 conversation 区域）
 - [ ] `galley session new "review PR" --project=<pid> --supervisor=ga-claude --reason="user asked"` → session 进 project + origin 三元组在 SQL 内
-- [ ] `galley session new "test" --llm=nonexistent-llm` → exit 2 invalid_args
+- [ ] `galley session new "test" --llm=nonexistent-llm` → exit 2 invalid_args **+ verify sessions list 不见此 session** (O1 atomicity invariant — transaction rolled back)
+- [ ] `galley session new ""` (empty task) → exit 2 invalid_args + zero side-effect
 
 ### Cluster 2 · session lifecycle from CLI
 - [ ] CLI `session new` → CLI `session send` 追加一句 → CLI `session stop` (mid-run) → CLI `session send` 又一句（验证 stop=abort 后 bridge 仍活）
 - [ ] CLI `session archive` → GUI sidebar 消失 → CLI `session restore` → GUI 回来
 - [ ] CLI `session btw <id> "side question about X"` → GUI conversation 显示 SystemMessage（or 不显示，per V0.1 transient 决策）
+- [ ] CLI `session move <sid> --to=<pid>` → GUI sidebar 旧位置消失、新 project 下出现 (O3)
+- [ ] CLI `session move <sid>` (no --to) → 同 session 拆出 project 到 ungrouped
 
-### Cluster 3 · project ops
+### Cluster 3 · project ops (O2 重点)
 - [ ] CLI `project create "myproj"` → GUI sidebar PROJECTS 出现
-- [ ] CLI `project move <sid>` (没 --to) → session 拆出 project
-- [ ] CLI `project archive <pid>` → project 消失 + 原 sessions ungrouped
+- [ ] CLI `project list` → 含 "myproj"
+- [ ] CLI `session move <sid> --to=<myproj-id>` → session 进 myproj (move 跨 cluster 复用; from cluster 2)
+- [ ] CLI `project delete <pid>` → project 消失 + 原 sessions ungrouped + return payload 含 `detachedSessions: count` (O2)
+- [ ] CLI `project delete <bogus-id>` → exit 3 not_found
 
 ### Cluster 4 · llm ops
 - [ ] cold (fresh install) `galley llm list` → empty NDJSON exit 0
 - [ ] GUI 起 session warmup → `galley llm list` → 全 LLM 在
 - [ ] CLI `llm set <sid> "<name>"` bridge alive → GUI MainView LLM popover 即时切换
 - [ ] CLI `llm set <sid> "<name>"` bridge dead → exit 0 dispatch=persisted_only；next GUI 触发 bridge spawn 后 LLM 是新值
+- [ ] CLI `llm set <sid> "GLM-4.5-X"` (case-mismatch vs cache "glm-4.5-x") → exit 0 (case-insensitive per R10)
 
 ---
 
@@ -613,13 +741,10 @@ M1 引入新代码 / 新 socket route / 新 trait method usage，**禁止留 TRA
 **理由**：超过 M5 1052 LOC 上限 (B3 实测 stable boundary)；revert 半状态破坏 noun-group ship；4 commit 才能让 reviewer 按 group focus。
 
 ### Reject #2 · `create_session_with_first_message` 加新 trait method (per playbook T1.1 原写法)
-**理由**：
-1. 实现成本 = 在 trait 加 method + SqliteGalley impl 内 wrap transaction + 接受 BEGIN/COMMIT 复杂度
-2. 收益 = 减少 race condition (session 创建 + first message 之间外部观察窗口)
-3. 实测窗口 = socket handler 内两步 SQL 之间约 1ms (本地 SQLite WAL mode)
-4. Race 后果 = GUI 看到 1ms 内空 session （已有 empty state graceful render）
-5. **Trade-off 不划算**：1ms 不可见的 race 不应换 trait method 复杂度 + 测试矩阵翻倍。
-6. **Alt path**：socket handler 内组合 create_session + send_message 两步 SQL，accept 1ms 窗口。
+**理由 (修订 2026-05-20 PM with O1 resolution)**：
+1. 实现成本 = 在 trait 加 1 method (composite) + SqliteGalley impl 内 wrap transaction + 接受 BEGIN/COMMIT 复杂度
+2. **替代路径** (O1 resolved): 加 2 个 `*_in_tx` trait method (`create_session_in_tx` + `send_message_in_tx`) 作既有 method 的 transaction-aware sibling，socket handler 内 inline BEGIN/COMMIT。**这条路径既保 atomicity 又不引入 composite method**（既有 owned-pool method 留给 GUI Tauri command path 用 byte-identical）。详 §1.9 实现细节
+3. composite method `create_session_with_first_message` 缺点：单一用例（CLI session.new）的合成 method，trait surface 膨胀；改 send_message body 时还需要同步 maintain composite method 内的 inline send_message logic; reuse 价值 < `*_in_tx` 通用 pattern
 
 ### Reject #3 · `session stop` 映射到 Shutdown
 **理由**：详 §1.4。Shutdown = bridge 死下次 send 必须 respawn (5-10s 启动成本)；用户 / agent 期待 stop 后能立刻继续。Shutdown 是 system-driven 操作 (LRU / Cmd-Q)，不该挂 user CLI surface。
@@ -631,7 +756,7 @@ M1 引入新代码 / 新 socket route / 新 trait method usage，**禁止留 TRA
 **理由**：详 §1.6。SOP agent 调 `llm list` 期待秒级返回（典型 "查一下 LLM 列表然后选一个"），5-10s spawn 延迟破坏 agent UX；SQLite cache 是 acceptable degradation；空 cache 的解决方案 "GUI 起一次 session" 已是用户 onboarding 一部分。
 
 ### Reject #6 · `project archive` 加 trait `archive_project` + `archived` 字段
-**理由**：scope creep。v0.5 project 没 archived state（B3 M4 只接 delete）；加 archived 字段 = migration 008 + GUI UI 改 + SOP 文档改 = 跑出 M1 scope；M1 把 archive 当 delete (FK CASCADE SET NULL 保护 sessions) 是 v0.5 acceptable；v0.6+ 加真 archive 时再 migration（R7 mitigation 已包含 SOP 强 messaging）。
+**理由**：scope creep。v0.5 project 没 archived state（B3 M4 只接 delete）；加 archived 字段 = migration 008 + GUI UI 改 + SOP 文档改 = 跑出 M1 scope；v0.6+ 加真 archive 时再 migration（O2 rename to `project delete` 后 v0.6+ `project archive` 是新加 NOT 覆盖；semantic debt 避免）。
 
 ### Reject #7 · CLI exit code 5 留到 M6 schema freeze 再加
 **理由**：M1 内 `session btw` 已有 runner_error 触发场景；M6 freeze 前漏掉则 schema freeze 后再加成本高（agent SOP 已写完 expect 0-4 mapping，加新 code 破坏 SOP）。M1.1 prereq commit 顺手加，干净。
@@ -645,16 +770,34 @@ M1 引入新代码 / 新 socket route / 新 trait method usage，**禁止留 TRA
 ### Reject #10 · `session watch --until=idle` 在 M1 实现
 **理由**：B4 playbook A1 / PRD §11.1 列 `--until=idle` 是 watch enhancement；B2 已 ship watch 基础；M1 scope 聚焦 11 个新 subcommand 不动 watch；watch enhancement 推 [M9 catchall](./B4-cli-bg-artifact.md#m9--b4-acceptance--v05-ship-准备-d65) 或独立 follow-up commit。
 
+### Reject #11 · 保留 `project move` 不改成 `session move` (O3 alt)
+**理由 (O3 resolved 2026-05-20 PM)**：原 PRD literal 是「project move」，但 PRD §11.2 #5 自家 grammar rule 是「`galley <noun> <verb>` noun 是 subject」。move 的 subject 是 session 不是 project。保留 `project move` = PRD 内部 §11.1 跟 §11.2 矛盾，agent-api §5.14 doc 强补「subject is session」是绕开 grammar rule 而非守住。**rename 比 doc 补丁优**：PRD 是内部文档，纠正 §11.1 比加 §5.14 文档补丁低成本 + 高一致性。
+
+### Reject #12 · 保留 `project archive` + 加 `--confirm-i-mean-delete` flag (O2 alt)
+**理由 (O2 resolved 2026-05-20 PM)**：原方案问题是 naming 撒谎（「archive」暗示 reversible，实际是 delete）。加 confirm flag 是对撒谎打补丁不是纠正撒谎。rename 到 `project delete` 让 naming 跟 behavior 一致是 root-cause fix；SOP 文档教 agent「destructive，先 confirm」是行为层教学，跟 surface naming 不互斥。v0.6+ 真 archive 落地 ship 新 `project archive` 命令带 reversible 语义，naming + behavior 严格对齐，无 semantic debt。
+
+### Reject #13 · O1 `session new` partial success exit 0
+**理由 (O1 resolved 2026-05-20 PM)**：partial success 违反 agent-api.md §4 「Exit code carries the category for SOPs that don't want to parse JSON」契约。Exit 0 + `dispatch: "message_persist_failed"` 信息在 JSON 里，但只看 exit code 的 SOP 会以为成功 → orphan empty session 留 DB。Transaction wrap 路径：要么全成 (exit 0) 要么全无 (exit 5 + rollback)，无 partial state，exit code 跟 JSON 严格一致。
+
 ---
 
-## Open decisions (M1 实施前要拍 — JC review)
+## 9. Open decisions resolution (2026-05-20 PM by JC)
 
-- [ ] **O1 NEW** `session new` first message persist fail 时的 CLI response shape：`{session, dispatch: "message_persist_failed", error: {...}}` exit 0 (agent decide retry) vs exit 5 runner_error (agent 失败 + 自行 cleanup)？**倾向前者**（partial success 信号更准确）
-- [ ] **O2 NEW** `project archive` 是否在 CLI 端硬阻拦 + 要求加 `--confirm-i-mean-delete` flag？还是 SOP 文档教 agent 流程？**倾向 SOP 教**（CLI surface 简洁优先；Galley CLI 不该假设 supervisor 不懂自己在干啥）
-- [ ] **O3 NEW** `project move` CLI surface 命名：`project move <sid>` (PRD literal) vs `session move <sid> --to=<pid>` (subject 更准)？**倾向保留 PRD 命名**避免 PRD 漂移，但 agent-api §5.14 doc 显式说明 subject 是 session
-- [ ] **O4 NEW** `project archive` SOP 教学：M4 SOP scenarios 显式演示 "Are you sure?" pre-archive 流程，还是默认 agent 自带 confirmation logic？**倾向显式演示**（M4 sub-plan 决定）
-- [ ] **O5 NEW** `session btw` 的 origin metadata 是否通过 Tauri event push 给 GUI 让 M7 行动日志渲染？vs 完全 lost？**倾向 push event**（M7 渲染 transparent 跟 session/project events 一致），M1 内**不**实现 emit (留 M7 sub-plan 决策具体 payload shape)
-- [ ] **O6 NEW** `session kill` (Shutdown surface) v0.5 是否加？**倾向不加**（Cmd-Q / LRU 自然触发；CLI surface 守简洁）。v0.6+ 看 dogfood 反馈再加
+> 6 decisions 全 resolved。3 个采纳推荐 alternative path (O1/O2/O3 都不走 sub-plan 原 lean，走第三方案)，3 个 confirm 原 lean (O4/O5/O6)。
+
+- [x] **O1** `session new` first message persist fail 处理 → **Transaction wrap + exit 5 runner_error** (第三方案，详 §1.9 + T1.2)。改完后 R1 closed。Sub-plan 原 lean (partial success exit 0) → Reject #13。
+- [x] **O2** `project archive` 命名 → **rename CLI 到 `project delete`** (第三方案)，PRD §11.1 同步改 + v0.6+ 再 ship 真 `project archive` reversible。改完后 R7 closed。Sub-plan 原 lean (保 archive + SOP 教) → Reject #12。
+- [x] **O3** `project move` vs `session move` → **改 `session move <id> --to=<pid>`** (PRD §11.2 #5 grammar rule 对齐)，PRD §11.1 同步改。改完后 R6 closed。Sub-plan 原 lean (保 PRD literal) → Reject #11。
+- [x] **O4** `project delete` SOP 演示 confirm → **punt to M4 sub-plan**。M1 内 `delete_project` 返 `detachedSessions: count` payload，agent 可决定是否 pre-confirm；M4 SOP 内显式演示是好实践但不是 M1 blocker。
+- [x] **O5** `session btw` origin push Tauri event → **M1 socket handler 留 `// TODO(M7): emit btw-dispatched event with origin payload` hook 点，本 milestone 不实现**。零代码成本 + 锁住 M7 集成路径；payload shape 由 M7 sub-plan 决定。
+- [x] **O6** `session kill` Shutdown surface → **v0.5 不加**。Cmd-Q + LRU 自然触发足够；CLI surface 守简洁；**新加监测项 N5 dogfood watch**：如 dogfood 期间出现 bridge wedge complaints (Python hang / OOM / IPC deadlock)，v0.6+ 再 ship `session kill`。
+
+**Net impact on M1 scope**:
+- T1.2 session new 加 SQLite transaction wrap (O1) — +30 LOC handler + 2 trait method (`*_in_tx` variants) + 1 helper refactor
+- T1.6 NEW `session move` (O3) — +socket handler + CLI subcommand + listener + tests (~80 LOC total)
+- T1.7 project group lose `move` (O3 移走) + rename `archive` → `delete` (O2)
+- PRD §11.1 update in M1.1 prereq commit
+- Net commit shape unchanged: still 4-commit M1.1-M1.4
 
 ---
 

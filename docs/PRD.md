@@ -299,10 +299,13 @@ galley session btw <id> "<q>" [--supervisor=...]
 galley session stop <id>
 galley session archive <id>
 galley session restore <id>
-galley session watch <id> [--filter=...] [--until=idle]   # NDJSON stream
+galley session move <id> [--to=<project-id>] [--supervisor=...]   # session 是 subject；no --to = 拆出 project
+galley session watch <id> [--filter=...] [--until=idle]            # NDJSON stream
 
 # Project
-galley project create / list / move / archive
+galley project create "<name>" [--description=...] [--supervisor=...]
+galley project list
+galley project delete <id> [--supervisor=...] [--reason=...]   # v0.5: destructive，sessions 自动拆到 ungrouped；v0.6+ 再 ship 真正的 `project archive` (reversible)
 
 # Config
 galley llm list
