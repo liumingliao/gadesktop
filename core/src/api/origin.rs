@@ -9,9 +9,9 @@ use serde::{Deserialize, Serialize};
 ///   - Gui        → user clicked Composer / used GUI controls
 ///   - Cli        → an agent invoked `galley` CLI
 ///   - Supervisor → a Supervisor SOP / agent acted through the socket
-///                  transport with an attached supervisor label
+///     transport with an attached supervisor label
 ///   - System     → Galley itself injected the message (e.g. /btw replies,
-///                  system-level notifications)
+///     system-level notifications)
 ///
 /// B1 used a narrower {Manual, Cli} pair; B2 M5 widens it to match the
 /// migrated schema. The `manual` wire value is no longer accepted — old

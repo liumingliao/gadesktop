@@ -1688,7 +1688,7 @@ fn mint_project_id() -> String {
     use std::time::{SystemTime, UNIX_EPOCH};
     let ts = SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_nanos() as u128)
+        .map(|d| d.as_nanos())
         .unwrap_or(0);
     let mut x: u128 = ts;
     // Splitmix-ish stir so two ids minted in the same ns differ.

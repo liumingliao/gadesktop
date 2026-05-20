@@ -51,6 +51,7 @@ async fn seed_session(pool: &SqlitePool, id: &str, title: &str, status: &str, ts
     .expect("seed session");
 }
 
+#[allow(clippy::too_many_arguments)] // Test seed helper — 8 args is fine.
 async fn seed_message(
     pool: &SqlitePool,
     id: &str,
