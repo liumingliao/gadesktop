@@ -30,22 +30,23 @@ docs/refactor/
 ## 当前 cursor
 
 ```
-Phase:    Prototype ✅ → B1 ✅ → B2 ✅ → [B3 M1-M5 ✅] → M6 → M7 → v0.5
-                                                       ↑ 现在在这里
-Status:   B3 M5 COMPLETE (code) — messagesStore extracted, last
-          per-session authoritative slice. useAppStore.ts 1431 → 465
-          (-966 LOC). New messages.ts 584 + messages/rowsToTurns.ts 123
-          (G11 sub-file split). 4 cross-store transitional stubs all
-          fixed (M3b onClose / M3b LRU / M4b clearSessionRuntime /
-          M4b applyRuntimeUpdate driver). activateSession moved to
-          sessionsStore. deriveSessionStatus signature decoupled via
-          MessagesView. Rust 0 changes (B3-I4). 126/126 tests +
-          typecheck + lint + cargo check clean.
-Next:     B3 M5 T5.16 dogfood (V5/V6/V7 + 7 cluster) → M6 sub-plan →
-          M6 prefsStore implementation → M7 acceptance + tag.
+Phase:    Prototype ✅ → B1 ✅ → B2 ✅ → [B3 M1-M5 ✅ + M6 sub-plan ✅] → M6 impl → M7 → v0.5
+                                                                            ↑ 现在在这里
+Status:   B3 M6 sub-plan SHIPPED (2026-05-20, paperwork-only session).
+          B3-M6-sub-plan.md 616 行: audit 5 字段 + 6 action + hydrate
+          orchestrator + seedMockSessions forward shim. Single commit
+          M6 决策 + useAppStore.ts 整文件删除（不留 shim per B3-I6）.
+          hydrateFromDB 拆 prefsStore.hydratePrefs + 新建 lib/hydrate.ts
+          orchestrator pure module. dispatchIPCEvent 删 store param.
+          5 reverse callers swap. R1-R10 risk register + V1-V10 + 7
+          cluster dogfood scenarios + 8 rejected alternatives. Rust 端
+          不动 (B3-I4 守, prefs-updated event 推 B4 之后).
+Next:     B3 M5 T5.16 dogfood (V5/V6/V7 + 7 cluster) — JC 真跑 →
+          JC review M6 sub-plan → M6 impl (fresh session) → M7
+          acceptance + tag b3-complete.
 Blocker:  M5 dogfood 1 day (B3-I1) — JC 验证 R3 (auto-scroll regression)
           + R4 (turnIndexOffset PK correctness) + 7 cluster scenarios.
-          M6 sub-plan paperwork 不阻 dogfood，可并行。
+          M6 sub-plan ✅ ship 完，不再阻 dogfood (paperwork 已 done).
 ```
 
 **Cursor 更新协议**：每个 sub-task 完成 → 当前 phase playbook 顶部的 cursor 行更新 → 本文件总 cursor 表跟着更新（只 phase 级别）。**不要批量更新**——每 task 一更，防止 session 中断后丢状态。
@@ -57,7 +58,7 @@ Blocker:  M5 dogfood 1 day (B3-I1) — JC 验证 R3 (auto-scroll regression)
 | Prototype: Rust-owned subprocess | ✅ COMPLETE · 17/17 · GO | — | [bridge-owner/README.md](../../core/experiments/bridge-owner/README.md) | 2026-05-18 session 1: all 5 subsections in one sprint |
 | B1: Rust core 骨架 + CLI 只读 | ✅ COMPLETE · M1-M7 · 11/12 A acceptance | — | [B1-rust-core.md](./B1-rust-core.md) · [devlog](../devlog/2026-05-18-b1-rust-core-complete.md) | 2026-05-18 single session — 21× faster than 3-week estimate |
 | B2: Bridge ownership 迁 Rust | ✅ COMPLETE · M1-M7 · 83 tests pass · tag `b2-complete` | — | [B2-bridge-ownership.md](./B2-bridge-ownership.md) · [devlog](../devlog/2026-05-19-b2-bridge-ownership-complete.md) | 2026-05-19 single session — full pipeline + docs + tag. Dogfood validation moved to B3 M2 启动门 ([prereq relaxation devlog](../devlog/2026-05-19-b3-prereq-relaxation.md)) |
-| B3: useAppStore 拆 slice + 改订阅 | 🟡 M1-M5 ✅ (dogfood pending) | T5.16 dogfood + M6 prefsStore | [B3-store-slice.md](./B3-store-slice.md) · M1 [devlog](../devlog/2026-05-19-b3-m1-design-complete.md) · M3 [devlog](../devlog/2026-05-19-b3-m3-complete.md) · M4 [devlog](../devlog/2026-05-19-b3-m4-complete.md) · M5 [devlog](../devlog/2026-05-19-b3-m5-complete.md) · 3 M1 design artifact [mapping](./b3-slice-mapping.md)/[ADR](./b3-slice-adr.md)/[emit catalogue](./b3-rust-emit-catalogue.md) · [M3 sub-plan](./B3-M3-sub-plan.md) · [M4 sub-plan](./B3-M4-sub-plan.md) · [M5 sub-plan](./B3-M5-sub-plan.md) | 2026-05-19 fifth session: M5 sub-plan + implementation 同 session 串完。Single commit M5 (`f7fc4e7`) 9 文件 +1052/-1160 LOC = useAppStore.ts -966 LOC (1431 → 465). messages.ts 584 + 子文件 rowsToTurns.ts 123 (G11). 4 cross-store stub 全 fix + activateSession 搬 sessionsStore + deriveSessionStatus MessagesView 解耦. Rust 0 改动 (B3-I4). M5 dogfood (R3/R4 高 severity) 留下次 session. |
+| B3: useAppStore 拆 slice + 改订阅 | 🟡 M1-M5 ✅ · M6 sub-plan ✅ (M5 dogfood + M6 impl pending) | M5 T5.16 dogfood + M6 impl | [B3-store-slice.md](./B3-store-slice.md) · M1 [devlog](../devlog/2026-05-19-b3-m1-design-complete.md) · M3 [devlog](../devlog/2026-05-19-b3-m3-complete.md) · M4 [devlog](../devlog/2026-05-19-b3-m4-complete.md) · M5 [devlog](../devlog/2026-05-19-b3-m5-complete.md) · 3 M1 design artifact [mapping](./b3-slice-mapping.md)/[ADR](./b3-slice-adr.md)/[emit catalogue](./b3-rust-emit-catalogue.md) · [M3 sub-plan](./B3-M3-sub-plan.md) · [M4 sub-plan](./B3-M4-sub-plan.md) · [M5 sub-plan](./B3-M5-sub-plan.md) · [M6 sub-plan](./B3-M6-sub-plan.md) | 2026-05-20 sixth session: M6 sub-plan ship (paperwork-only, 0 代码改动). 616 行: audit 5 字段 + 6 action + hydrate orchestrator + seedMockSessions forward shim; single commit M6 + **useAppStore.ts 整文件删除** + hydrateFromDB 拆 prefsStore.hydratePrefs + 新建 lib/hydrate.ts; dispatchIPCEvent 删 store param; 5 reverse callers swap; R1-R10 + V1-V10 + 7 cluster + 8 rejected alternatives. Rust 端不动 (B3-I4). |
 | B4: CLI feature-complete + background + artifact | ⏳ 未启动 | — | [B4-cli-bg-artifact.md](./B4-cli-bg-artifact.md) (stub) | 2026-05-15 stub |
 | **v0.5 milestone** | ⏳ | — | — | — |
 
