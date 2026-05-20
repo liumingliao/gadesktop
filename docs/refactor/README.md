@@ -30,34 +30,34 @@ docs/refactor/
 ## 当前 cursor
 
 ```
-Phase:    Prototype ✅ → B1 ✅ → B2 ✅ → B3 ✅ → [B4 M1+M3+M4 T4.1+M5+M6 ✅] → v0.5
+Phase:    Prototype ✅ → B1 ✅ → B2 ✅ → B3 ✅ → [B4 M1+M3+M4 T4.1+M5+M6+M7 ✅] → v0.5
                                                 ↑ 现在在这里
-Status:   B4 M6 COMPLETE (2026-05-20) — `schemaVersion: 1` FROZEN.
-          Pre-freeze schema audit (G6 honored) caught two hairline
-          issues: (Issue A) `galley version` was emitting snake_case
-          `galley_version` / `schema_version` while every other wire
-          field uses camelCase — fixed by serde `rename_all` on the
-          VersionPayload struct; (Issue B) read error envelope had
-          `{error, detail:{message}}` nested while socket has
-          `{ok, requestId, error, message}` flat — fixed by
-          dropping the serde `content = "detail"` so GalleyError
-          fields flatten, matching socket shape. Both fixes safe
-          (zero shipped consumers, zero test breakage). `--schema=N`
-          global CLI flag added so SOPs can pin (mismatch → exit 2
-          invalid_args with `schema_mismatch:` prefix). agent-api.md
-          got §1.1 stable identifier sets + §1.2 schema pinning doc
-          + §6 unified error envelope + §6A Origin per-via semantics
-          + §8A trait surface reframe. 169 tests pass (was 167 +2
-          schema pin tests). A2 ticked.
-Next:     M7 supervisor 行动日志 GUI (PRD §6.1 #4) OR M8 v0.x → v0.5
-          data migration. M7 frontend-heavy (SQLite origin path
-          already wired in B2 mig 006/007 + B4 M1 socket origin);
+Status:   B4 M7 COMPLETE (2026-05-20, supervisor 行动日志 GUI):
+          (T7.1) Origin plumbing — MessageRow extended with
+          created_via / supervisor / origin_note; rowsToTurns lifts
+          them onto UserTurn (history restore path); App.tsx live
+          listener extracts origin from `user-message-persisted`
+          Tauri event (live path). UserTurn now carries an optional
+          `origin: Origin` + `createdAt: string`. (T7.2) Inline
+          annotation strip rendered above the user-msg callout when
+          `origin.via === "supervisor"`: italic 11.5px ink-muted,
+          format `@<supervisor> · <reason≤80chars> · <relative time>`,
+          tooltip carries full untruncated reason + absolute ISO.
+          (T7.3) TopBar SupervisorActivityIndicator — neutral pill
+          with Robot icon + `@<latest> · <count>`, click → Popover
+          showing per-supervisor breakdown ordered last-seen-first.
+          `deriveSupervisorActivity` aggregates from active session
+          turns in App.tsx (useMemo). A12 partial tick — files
+          shipped + checks clean; full A12 requires JC to fire a
+          `galley session send --supervisor=…` and see the
+          annotation + pill render live.
+Next:     M8 v0.x → v0.5 data migration OR JC dogfood interleave.
           M8 needs JC's accumulated dogfood data + backup migration
-          design. Either unblocks more A* tick. Alternatives: JC
-          dogfood M5+M3 trigger validation (15-30min, finishes A10
-          full tick); M2 tray spike still Windows-gated.
+          design (calendar-gated). Dogfood (M5 + M3 + M7 trigger
+          validation, 15-30 min) finishes A10 and A12 full ticks
+          and is cheap interleave; doesn't gate other milestones.
 Blocker:  M2 gated on tray spike (Windows machine access).
-          M7 / M8 / dogfood have no external blocker.
+          M8 / dogfood have no external blocker.
 ```
 
 **Cursor 更新协议**：每个 sub-task 完成 → 当前 phase playbook 顶部的 cursor 行更新 → 本文件总 cursor 表跟着更新（只 phase 级别）。**不要批量更新**——每 task 一更，防止 session 中断后丢状态。
@@ -70,7 +70,7 @@ Blocker:  M2 gated on tray spike (Windows machine access).
 | B1: Rust core 骨架 + CLI 只读 | ✅ COMPLETE · M1-M7 · 11/12 A acceptance | — | [B1-rust-core.md](./B1-rust-core.md) · [devlog](../devlog/2026-05-18-b1-rust-core-complete.md) | 2026-05-18 single session — 21× faster than 3-week estimate |
 | B2: Bridge ownership 迁 Rust | ✅ COMPLETE · M1-M7 · 83 tests pass · tag `b2-complete` | — | [B2-bridge-ownership.md](./B2-bridge-ownership.md) · [devlog](../devlog/2026-05-19-b2-bridge-ownership-complete.md) | 2026-05-19 single session — full pipeline + docs + tag. Dogfood validation moved to B3 M2 启动门 ([prereq relaxation devlog](../devlog/2026-05-19-b3-prereq-relaxation.md)) |
 | B3: useAppStore 拆 slice + 改订阅 | ✅ COMPLETE · M1-M6 · A1-A11 全 tick · tag `b3-complete` | — | [B3-store-slice.md](./B3-store-slice.md) · [B3 完成 devlog](../devlog/2026-05-20-b3-store-slice-complete.md) · M1 [devlog](../devlog/2026-05-19-b3-m1-design-complete.md) · M3 [devlog](../devlog/2026-05-19-b3-m3-complete.md) · M4 [devlog](../devlog/2026-05-19-b3-m4-complete.md) · M5 [devlog](../devlog/2026-05-19-b3-m5-complete.md) · 3 M1 design artifact [mapping](./b3-slice-mapping.md)/[ADR](./b3-slice-adr.md)/[emit catalogue](./b3-rust-emit-catalogue.md) · [M3 sub-plan](./B3-M3-sub-plan.md) · [M4 sub-plan](./B3-M4-sub-plan.md) · [M5 sub-plan](./B3-M5-sub-plan.md) · [M6 sub-plan](./B3-M6-sub-plan.md) | 2026-05-20 sixth session: M6 sub-plan + impl + M7 acceptance + devlog + tag 全 ship。B3 整体跨 6 session、2 day calendar (estimate 3-4 weeks)，21× faster. JC dev dogfood 2026-05-20 initial pass。最终 6 文件 + 1 lib orchestrator. useAppStore.ts 整文件删除. tag `b3-complete`. |
-| B4: CLI feature-complete + background + artifact | ✅ M1 + M3 + M4 T4.1 + M5 + M6 shipped · M7/M8 next | M7 supervisor 行动日志 GUI or M8 data migration | [B4-cli-bg-artifact.md](./B4-cli-bg-artifact.md) · [B4 M1 sub-plan](./B4-M1-sub-plan.md) | 2026-05-20 single-day spree: M1 (4 commits) → M4 T4.1 SOP doc `bf9e607` → **M3 COMPLETE (4 commits)**: T3.1 `f0e6306` discovery file + T3.2+T3.5 `2554cb7` Settings → Integration tab + T3.4 `a218b00` SOP install button + T3.3 `d23dfc6` macOS PATH install → **M5 COMPLETE**: `.claude/skills/galley-supervisor/` ship — SKILL.md (bilingual trigger keywords + 6-step body) + references/SOP verbatim copy + install README → **M6 COMPLETE (schema freeze)**: pre-freeze audit caught + fixed 2 hairline issues (camelCase version output, flat error envelope), `--schema=N` CLI flag added, agent-api.md got §1.1 stable identifier sets + §1.2 schema pinning + unified error envelope + Origin per-via semantics. A1 ✅ A2 ✅ A5 ✅ A6 ✅ A7 ✅ A8 ✅ A10 partial ✅ for the supervisor surface stack — `schemaVersion: 1` FROZEN. 169 tests + typecheck/lint clean throughout. |
+| B4: CLI feature-complete + background + artifact | ✅ M1 + M3 + M4 T4.1 + M5 + M6 + M7 shipped · M2 / M8 / dogfood next | M8 data migration (or JC dogfood interleave) | [B4-cli-bg-artifact.md](./B4-cli-bg-artifact.md) · [B4 M1 sub-plan](./B4-M1-sub-plan.md) | 2026-05-20 single-day spree: M1 (4 commits) → M4 T4.1 SOP doc `bf9e607` → **M3 COMPLETE (4 commits)**: T3.1 `f0e6306` discovery file + T3.2+T3.5 `2554cb7` Settings → Integration tab + T3.4 `a218b00` SOP install button + T3.3 `d23dfc6` macOS PATH install → **M5 COMPLETE**: `.claude/skills/galley-supervisor/` ship — SKILL.md (bilingual trigger keywords + 6-step body) + references/SOP verbatim copy + install README → **M6 COMPLETE (schema freeze)**: pre-freeze audit caught + fixed 2 hairline issues (camelCase version output, flat error envelope), `--schema=N` CLI flag added, agent-api.md got §1.1 stable identifier sets + §1.2 schema pinning + unified error envelope + Origin per-via semantics. A1 ✅ A2 ✅ A5 ✅ A6 ✅ A7 ✅ A8 ✅ A10 partial ✅ for the supervisor surface stack — `schemaVersion: 1` FROZEN. 169 tests + typecheck/lint clean throughout. |
 | **v0.5 milestone** | ⏳ | — | — | — |
 
 预计总时长：**10-12 周**（不含 v0.2 Windows release）。
