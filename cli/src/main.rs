@@ -23,6 +23,7 @@ use galley_core_lib::api::{
 use galley_core_lib::db::SqliteGalley;
 use galley_core_lib::error::GalleyError;
 use galley_core_lib::socket_listener::socket_path;
+use serde_json::Value;
 
 const SCHEMA_VERSION: u32 = 1;
 
@@ -56,6 +57,86 @@ enum Command {
 
     /// Print the CLI + schema version.
     Version,
+
+    /// Project operations (create / list / delete). v0.5 has no
+    /// reversible "archive" surface — `delete` is destructive (FK SET
+    /// NULL detaches child sessions to ungrouped). A future v0.6+ ships
+    /// `archive` separately with reversible semantics (sub-plan O2).
+    #[command(subcommand)]
+    Project(ProjectCmd),
+
+    /// LLM configuration commands. `llm list` reads the cached
+    /// `llm_list` pref that the GUI seeds after a bridge warmup —
+    /// requires Galley GUI to have been opened at least once. `llm set`
+    /// persists a per-session pick + best-effort tells any live runner.
+    #[command(subcommand)]
+    Llm(LlmCmd),
+}
+
+#[derive(Subcommand, Debug)]
+enum ProjectCmd {
+    /// Create a project.
+    Create {
+        /// Project name (will be trimmed; empty → exit 2).
+        name: String,
+        /// Optional filesystem root path. Historical — currently stored
+        /// on the row but no longer injected at runner spawn (see
+        /// 2026-05-14 devlog on the rootPath rollback).
+        #[arg(long)]
+        root_path: Option<String>,
+        /// Optional emoji icon. Defaults to GUI's `📁` if omitted.
+        #[arg(long)]
+        icon: Option<String>,
+        /// Optional accent color (hex e.g. `#7c84ff`).
+        #[arg(long)]
+        color: Option<String>,
+        #[arg(long)]
+        supervisor: Option<String>,
+        #[arg(long)]
+        reason: Option<String>,
+    },
+    /// List all projects ordered pinned-first then by recency.
+    /// Read-only — opens SQLite directly without requiring Galley Core
+    /// to be running.
+    List,
+    /// Permanently delete a project. Child sessions auto-detach to
+    /// ungrouped (FK SET NULL); the sessions themselves survive.
+    /// Response includes `detachedSessions` count + the list of
+    /// affected session ids so a supervisor agent can log the side
+    /// effect.
+    ///
+    /// v0.5: this is destructive. v0.6+ will ship a separate
+    /// `archive` command with reversible semantics (sub-plan O2).
+    Delete {
+        /// Project id.
+        project_id: String,
+        #[arg(long)]
+        supervisor: Option<String>,
+        #[arg(long)]
+        reason: Option<String>,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum LlmCmd {
+    /// List LLMs configured in the user's `mykey.py`. Read-only — opens
+    /// SQLite directly. Returns the same `{index, name}` shape the GUI
+    /// caches after a bridge warmup. Empty NDJSON when the cache is
+    /// unwarmed (open the GUI once to populate).
+    List,
+    /// Pick the LLM for a session by display name (case-insensitive).
+    /// Persists `selectedLlmIndex` + `selectedLlmDisplayName` on the
+    /// session row + best-effort tells the live runner via
+    /// `IpcCommand::SetLlm`. The DB write is the source of truth; the
+    /// runner dispatch is opportunistic. `dispatch=dispatched` /
+    /// `persisted_only` indicates which path ran.
+    Set {
+        /// Session id.
+        session_id: String,
+        /// Display name of the LLM as it appears in `galley llm list`
+        /// (case-insensitive).
+        llm_name: String,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -372,6 +453,25 @@ async fn run(cli: Cli) -> Result<(), GalleyError> {
             })?;
             Ok(())
         }
+        Command::Project(ProjectCmd::Create {
+            name,
+            root_path,
+            icon,
+            color,
+            supervisor,
+            reason,
+        }) => project_create(name, root_path, icon, color, supervisor, reason).await,
+        Command::Project(ProjectCmd::List) => project_list().await,
+        Command::Project(ProjectCmd::Delete {
+            project_id,
+            supervisor,
+            reason,
+        }) => project_delete(project_id, supervisor, reason).await,
+        Command::Llm(LlmCmd::List) => llm_list().await,
+        Command::Llm(LlmCmd::Set {
+            session_id,
+            llm_name,
+        }) => llm_set(session_id, llm_name).await,
     }
 }
 
@@ -748,6 +848,102 @@ async fn session_move(
             "to": to,
             "supervisor": supervisor,
             "reason": reason,
+        },
+        "schemaVersion": SCHEMA_VERSION,
+    });
+    unary_command(req).await
+}
+
+// ---- B4 M1.3 helpers · project + llm ----
+
+async fn project_create(
+    name: String,
+    root_path: Option<String>,
+    icon: Option<String>,
+    color: Option<String>,
+    supervisor: Option<String>,
+    reason: Option<String>,
+) -> Result<(), GalleyError> {
+    let req = serde_json::json!({
+        "command": "project.create",
+        "args": {
+            "name": name,
+            "rootPath": root_path,
+            "icon": icon,
+            "color": color,
+            "supervisor": supervisor,
+            "reason": reason,
+        },
+        "schemaVersion": SCHEMA_VERSION,
+    });
+    unary_command(req).await
+}
+
+/// `project list` bypasses the socket and opens SQLite directly —
+/// inventory-style read, mirror of `sessions list`. Works even when
+/// Galley Core isn't running.
+async fn project_list() -> Result<(), GalleyError> {
+    let galley = SqliteGalley::open().await?;
+    let projects = galley.list_projects().await?;
+    for p in projects {
+        emit_json(&p)?;
+    }
+    Ok(())
+}
+
+async fn project_delete(
+    project_id: String,
+    supervisor: Option<String>,
+    reason: Option<String>,
+) -> Result<(), GalleyError> {
+    let req = serde_json::json!({
+        "command": "project.delete",
+        "args": {
+            "projectId": project_id,
+            "supervisor": supervisor,
+            "reason": reason,
+        },
+        "schemaVersion": SCHEMA_VERSION,
+    });
+    unary_command(req).await
+}
+
+/// `llm list` bypasses the socket and reads the cached `llm_list` pref
+/// directly. Sub-plan §1.6 chose this path over a socket round-trip so
+/// the command stays sub-50ms regardless of bridge spawn cost.
+/// `index` is `u32` — guard against bogus pref values by skipping
+/// entries that don't parse cleanly.
+async fn llm_list() -> Result<(), GalleyError> {
+    let galley = SqliteGalley::open().await?;
+    let Some(raw) = galley.get_pref_json("llm_list").await? else {
+        return Ok(()); // empty stdout, exit 0 — cache unwarmed
+    };
+    // Expected shape: `[{"index": <u32>, "name": "<str>"}, ...]`. Other
+    // shapes mean a future GUI rev changed the schema — print what's
+    // there and let the caller notice.
+    let arr = match raw {
+        Value::Array(xs) => xs,
+        other => {
+            return Err(GalleyError::InvalidArgs {
+                message: format!(
+                    "pref llm_list is not an array: {}",
+                    other
+                ),
+            });
+        }
+    };
+    for entry in arr {
+        emit_json(&entry)?;
+    }
+    Ok(())
+}
+
+async fn llm_set(session_id: String, llm_name: String) -> Result<(), GalleyError> {
+    let req = serde_json::json!({
+        "command": "llm.set",
+        "args": {
+            "sessionId": session_id,
+            "llmName": llm_name,
         },
         "schemaVersion": SCHEMA_VERSION,
     });

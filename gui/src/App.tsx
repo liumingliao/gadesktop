@@ -113,6 +113,12 @@ function App() {
   const applyExternalSessionUpdated = useSessionsStore(
     (s) => s.applyExternalSessionUpdated,
   );
+  const applyExternalProjectCreated = useSessionsStore(
+    (s) => s.applyExternalProjectCreated,
+  );
+  const applyExternalProjectDeleted = useSessionsStore(
+    (s) => s.applyExternalProjectDeleted,
+  );
   // LLM / runtimeInfo / pet state now live in runtimeStore (M3a).
   // Subscribe to the active session's per-runtime entry so the
   // Composer pill + dropdown + Inspector tab re-render on changes.
@@ -372,12 +378,50 @@ function App() {
       await subscribe("session-moved-external", (p) =>
         applyExternalSessionUpdated(p.session),
       );
+      // M1.3 llm.set rides this channel so the Composer pill picks up
+      // a CLI / supervisor LLM switch without a list_sessions refresh.
+      await subscribe("session-updated-external", (p) =>
+        applyExternalSessionUpdated(p.session),
+      );
     })();
     return () => {
       cancelled = true;
       unlisteners.forEach((fn) => fn());
     };
   }, [applyExternalSessionCreated, applyExternalSessionUpdated]);
+
+  // B4 M1.3 project-write listeners. Same pattern as the session ones
+  // above but with a different payload shape (`project` not `session`),
+  // and `project-deleted-external` carries the FK SET NULL detach
+  // metadata so we don't have to re-query the list.
+  useEffect(() => {
+    let cancelled = false;
+    const unlisteners: Array<() => void> = [];
+    void (async () => {
+      const createdFn = await listen<{
+        project: Parameters<typeof applyExternalProjectCreated>[0];
+        via: string;
+      }>("project-created-external", (e) => {
+        applyExternalProjectCreated(e.payload.project);
+      });
+      if (cancelled) createdFn();
+      else unlisteners.push(createdFn);
+
+      const deletedFn = await listen<{
+        projectId: string;
+        detachedSessions: number;
+        detachedSessionIds: string[];
+      }>("project-deleted-external", (e) => {
+        applyExternalProjectDeleted(e.payload.projectId);
+      });
+      if (cancelled) deletedFn();
+      else unlisteners.push(deletedFn);
+    })();
+    return () => {
+      cancelled = true;
+      unlisteners.forEach((fn) => fn());
+    };
+  }, [applyExternalProjectCreated, applyExternalProjectDeleted]);
 
   // Conversation source-of-truth precedence:
   //   1. store.turns + store.pendingApprovals — populated by IPC

@@ -52,10 +52,11 @@
 //! process's bind (~ms; OS-level atomic bind would close this fully).
 
 use crate::api::message::MessageBrief;
+use crate::api::project::{CreateProjectInput, ProjectBrief, ProjectId};
 use crate::api::session::{CreateSessionInput, SessionBrief};
 use crate::api::{GalleyApi, Origin, OriginVia, SessionFilter, SessionId};
 use crate::db::SqliteGalley;
-use crate::ipc::{IpcCommand, UserMessageCommand};
+use crate::ipc::{IpcCommand, SetLlmCommand, UserMessageCommand};
 use crate::runner_manager::SendCommandError;
 use crate::runner_manager::{BroadcastItem, RunnerManager};
 use serde::{Deserialize, Serialize};
@@ -584,6 +585,16 @@ async fn dispatch_line(
         "session.move" => {
             DispatchResult::Unary(dispatch_session_move(request_id, req.args, app).await)
         }
+        // ---- B4 M1.3 project + llm write commands ----
+        "project.create" => {
+            DispatchResult::Unary(dispatch_project_create(request_id, req.args, app).await)
+        }
+        "project.delete" => {
+            DispatchResult::Unary(dispatch_project_delete(request_id, req.args, app).await)
+        }
+        "llm.set" => DispatchResult::Unary(
+            dispatch_llm_set(request_id, req.args, app, manager).await,
+        ),
         other => DispatchResult::Unary(SocketResponse::err(
             request_id,
             "unknown_command",
@@ -1367,6 +1378,326 @@ fn radix36(mut n: u64) -> String {
 /// so a CLI-created row + a GUI-created row look identical in the
 /// sidebar. The bridge derives a better title after the first turn ends.
 const DEFAULT_NEW_SESSION_TITLE: &str = "新对话";
+
+// ---------------- B4 M1.3 · project + llm write handlers ----------------
+
+#[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct ProjectExternalPayload {
+    project: ProjectBrief,
+    via: &'static str,
+}
+
+/// `project.delete` carries extra payload that `ProjectExternalPayload`
+/// can't express — the affected child sessions get their `project_id`
+/// auto-detached (FK SET NULL), and the GUI needs to mirror that.
+#[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct ProjectDeletedPayload {
+    project_id: String,
+    /// Number of sessions whose `project_id` was just set to NULL.
+    /// CLI returns this in the response too so a supervisor agent can
+    /// surface the side effect in its action log.
+    detached_sessions: u32,
+    detached_session_ids: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ProjectCreateArgs {
+    name: String,
+    #[serde(default)]
+    root_path: Option<String>,
+    #[serde(default)]
+    icon: Option<String>,
+    #[serde(default)]
+    color: Option<String>,
+    #[serde(default)]
+    supervisor: Option<String>,
+    #[serde(default)]
+    reason: Option<String>,
+}
+
+async fn dispatch_project_create(
+    request_id: Option<String>,
+    args: Value,
+    app: Option<&AppHandle>,
+) -> SocketResponse {
+    let parsed: ProjectCreateArgs = match serde_json::from_value(args) {
+        Ok(a) => a,
+        Err(e) => {
+            return SocketResponse::err(
+                request_id,
+                "invalid_args",
+                format!("project.create args: {e}"),
+            );
+        }
+    };
+    let name = parsed.name.trim().to_string();
+    if name.is_empty() {
+        return SocketResponse::err(
+            request_id,
+            "invalid_args",
+            "project.create: name is empty",
+        );
+    }
+    let galley = match SqliteGalley::open().await {
+        Ok(g) => g,
+        Err(e) => {
+            return SocketResponse::err(
+                request_id,
+                "db_unavailable",
+                format!("open: {e}"),
+            );
+        }
+    };
+
+    let input = CreateProjectInput {
+        id: mint_project_id(),
+        name,
+        root_path: parsed.root_path.and_then(|s| {
+            let t = s.trim().to_string();
+            if t.is_empty() { None } else { Some(t) }
+        }),
+        icon: parsed.icon,
+        color: parsed.color,
+    };
+    let origin = origin_from_args(parsed.supervisor, parsed.reason);
+
+    match galley.create_project(input, origin).await {
+        Ok(brief) => {
+            if let Some(app) = app {
+                let _ = app.emit(
+                    "project-created-external",
+                    ProjectExternalPayload {
+                        project: brief.clone(),
+                        via: "project.create",
+                    },
+                );
+            }
+            SocketResponse::ok(request_id, serde_json::json!({ "project": brief }))
+        }
+        Err(e) => map_galley_err(request_id, e),
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ProjectDeleteArgs {
+    project_id: String,
+    #[serde(default)]
+    supervisor: Option<String>,
+    #[serde(default)]
+    reason: Option<String>,
+}
+
+/// Destructive: removes the project row. FK CASCADE SET NULL detaches
+/// child sessions to ungrouped — those rows survive but their
+/// `project_id` flips to NULL. The CLI surface deliberately calls this
+/// `delete` (not `archive`) per sub-plan O2 — the operation is
+/// destructive and the naming should reflect that. A future v0.6+ may
+/// ship a true reversible `project archive` alongside.
+async fn dispatch_project_delete(
+    request_id: Option<String>,
+    args: Value,
+    app: Option<&AppHandle>,
+) -> SocketResponse {
+    let parsed: ProjectDeleteArgs = match serde_json::from_value(args) {
+        Ok(a) => a,
+        Err(e) => {
+            return SocketResponse::err(
+                request_id,
+                "invalid_args",
+                format!("project.delete args: {e}"),
+            );
+        }
+    };
+    let galley = match SqliteGalley::open().await {
+        Ok(g) => g,
+        Err(e) => {
+            return SocketResponse::err(
+                request_id,
+                "db_unavailable",
+                format!("open: {e}"),
+            );
+        }
+    };
+
+    // Snapshot child sessions BEFORE the delete so we can surface
+    // `detachedSessions` to the caller + GUI listener. SQLite SET NULL
+    // is atomic with the row drop, so a list-then-delete sequence races
+    // against concurrent GUI writes only by the few ms between the two
+    // queries — acceptable for a count meant for human-readable feedback.
+    let detached_ids: Vec<String> = match galley
+        .list_sessions(SessionFilter {
+            project_id: Some(parsed.project_id.clone()),
+            status: None,
+            archived: None,
+        })
+        .await
+    {
+        Ok(rows) => rows.into_iter().map(|s| s.id.0).collect(),
+        Err(e) => return map_galley_err(request_id, e),
+    };
+
+    let origin = origin_from_args(parsed.supervisor, parsed.reason);
+    if let Err(e) = galley
+        .delete_project(ProjectId(parsed.project_id.clone()), origin)
+        .await
+    {
+        return map_galley_err(request_id, e);
+    }
+
+    let payload = ProjectDeletedPayload {
+        project_id: parsed.project_id,
+        detached_sessions: detached_ids.len() as u32,
+        detached_session_ids: detached_ids.clone(),
+    };
+    if let Some(app) = app {
+        let _ = app.emit("project-deleted-external", payload.clone());
+    }
+    SocketResponse::ok(
+        request_id,
+        serde_json::json!({
+            "deleted": true,
+            "projectId": payload.project_id,
+            "detachedSessions": payload.detached_sessions,
+            "detachedSessionIds": payload.detached_session_ids,
+        }),
+    )
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct LlmSetArgs {
+    session_id: String,
+    llm_name: String,
+}
+
+/// Persist a session's per-bridge LLM choice + best-effort dispatch
+/// `SetLlm` to any live runner. Two-step semantics mirror `session.send`:
+/// the DB row is the source of truth; runner dispatch is opportunistic.
+/// `dispatch` field in the response tells the caller which path ran.
+async fn dispatch_llm_set(
+    request_id: Option<String>,
+    args: Value,
+    app: Option<&AppHandle>,
+    manager: &RunnerManager,
+) -> SocketResponse {
+    let parsed: LlmSetArgs = match serde_json::from_value(args) {
+        Ok(a) => a,
+        Err(e) => {
+            return SocketResponse::err(
+                request_id,
+                "invalid_args",
+                format!("llm.set args: {e}"),
+            );
+        }
+    };
+    let galley = match SqliteGalley::open().await {
+        Ok(g) => g,
+        Err(e) => {
+            return SocketResponse::err(
+                request_id,
+                "db_unavailable",
+                format!("open: {e}"),
+            );
+        }
+    };
+
+    // 1. Resolve display name → index via the cached llm_list pref.
+    //    Reuses the same resolver as `session.new --llm=...` so the two
+    //    surfaces agree on case-insensitive matching + cache-empty
+    //    diagnostics.
+    let (index, display_name) =
+        match resolve_llm_name(&galley, Some(parsed.llm_name.clone())).await {
+            Ok((Some(i), Some(n))) => (i, n),
+            Ok(_) => {
+                return SocketResponse::err(
+                    request_id,
+                    "invalid_args",
+                    "llm.set: llm name resolved to empty (cache shape unexpected)",
+                );
+            }
+            Err(resp) => return resp.with_request_id(request_id),
+        };
+
+    // 2. Validate the session exists. set_session_llm itself returns
+    //    NotFound on a missing row, but we surface a clearer error here
+    //    by checking up-front.
+    let sid = SessionId(parsed.session_id.clone());
+
+    let brief = match galley
+        .set_session_llm(sid, Some(index), Some(display_name.clone()))
+        .await
+    {
+        Ok(b) => b,
+        Err(e) => return map_galley_err(request_id, e),
+    };
+
+    // 3. Best-effort: tell any live runner the new pick. Drop the
+    //    galley handle first so the manager's lock acquisition doesn't
+    //    serialize against an unrelated SqliteGalley reference.
+    drop(galley);
+    let dispatch_status = match manager
+        .send_command(
+            &parsed.session_id,
+            &IpcCommand::SetLlm(SetLlmCommand {
+                llm_index: index as i64,
+            }),
+        )
+        .await
+    {
+        Ok(()) => "dispatched",
+        Err(SendCommandError::ProcessGone { .. }) => "persisted_only",
+        Err(e) => {
+            return SocketResponse::err(
+                request_id,
+                "runner_error",
+                format!("llm.set runner dispatch: {e}"),
+            );
+        }
+    };
+
+    // 4. Mirror to GUI so the Composer pill / Inspector reflect the
+    //    new persisted choice. Reuses the session-updated channel that
+    //    the M1.2 listener handles via `applyExternalSessionUpdated`.
+    if let Some(app) = app {
+        let _ = app.emit(
+            "session-updated-external",
+            SessionExternalPayload {
+                session: brief.clone(),
+                via: "llm.set",
+            },
+        );
+    }
+
+    SocketResponse::ok(
+        request_id,
+        serde_json::json!({
+            "session": brief,
+            "dispatch": dispatch_status,
+        }),
+    )
+}
+
+/// Mint a project id matching the GUI's `proj_<16-hex>` shape (see
+/// `gui/src/stores/sessions.ts:929`). Hex is fine — collision space
+/// for a single-user app is enormous and the id is opaque downstream.
+fn mint_project_id() -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let ts = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_nanos() as u128)
+        .unwrap_or(0);
+    let mut x: u128 = ts;
+    // Splitmix-ish stir so two ids minted in the same ns differ.
+    x ^= x.wrapping_mul(0x9E3779B97F4A7C15_9E3779B97F4A7C15);
+    x ^= x >> 64;
+    x ^= x.wrapping_mul(0xC4CEB9FE1A85EC53_C4CEB9FE1A85EC53);
+    let hex = format!("{x:032x}");
+    format!("proj_{}", &hex[..16])
+}
 
 async fn dispatch_sessions_list(request_id: Option<String>, args: Value) -> SocketResponse {
     let filter: SessionFilter = match serde_json::from_value(args) {

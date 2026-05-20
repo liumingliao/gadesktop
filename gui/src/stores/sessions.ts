@@ -422,9 +422,17 @@ interface SessionsActions {
    * arrives second. */
   applyExternalSessionCreated: (brief: SessionBriefWire) => void;
   /** Patch the in-memory row from `session.archive` / `session.restore` /
-   * `session.move` socket emits. No-op if the id isn't known yet (will
-   * land via `applyExternalSessionCreated` first). */
+   * `session.move` / `llm.set` (`session-updated-external`) socket
+   * emits. No-op if the id isn't known yet (will land via
+   * `applyExternalSessionCreated` first). */
   applyExternalSessionUpdated: (brief: SessionBriefWire) => void;
+  /** Insert a CLI / supervisor-created project. Merge-replaces if the
+   * GUI just created the same id locally. */
+  applyExternalProjectCreated: (brief: ProjectBriefWire) => void;
+  /** Mirror the FK SET NULL detach: drops the project row + nulls
+   * `projectId` on any sessions that were attached to it. Clears the
+   * active filter if it pointed at this project. */
+  applyExternalProjectDeleted: (projectId: string) => void;
 
   // ---- hydrate / dev ----
   /** Load sessions + projects from Rust core. Called by the cold-start
@@ -1151,6 +1159,12 @@ export const useSessionsStore = create<SessionsStore>((set, get) => ({
           turnCount: brief.turnCount ?? s.turnCount,
           pinned: brief.pinned ?? s.pinned,
           hasUnread: brief.hasUnread ?? s.hasUnread,
+          // M1.3 llm.set rides the session-updated channel — patch the
+          // persisted LLM fields so the Composer pill / Inspector pick
+          // up CLI-driven changes immediately.
+          selectedLlmIndex: brief.selectedLlmIndex ?? s.selectedLlmIndex,
+          selectedLlmDisplayName:
+            brief.selectedLlmDisplayName ?? s.selectedLlmDisplayName,
           lastActivityAt: brief.lastActivityAt,
           updatedAt: brief.updatedAt,
         }),
@@ -1166,6 +1180,38 @@ export const useSessionsStore = create<SessionsStore>((set, get) => ({
       }
       return changed ? { sessions } : {};
     });
+  },
+
+  applyExternalProjectCreated: (brief) => {
+    set((state) => {
+      // Race guard: if the GUI just created the same project locally,
+      // merge in place rather than duplicating the row.
+      const idx = state.projects.findIndex((p) => p.id === brief.id);
+      if (idx === -1) {
+        return { projects: [projectFromBrief(brief), ...state.projects] };
+      }
+      const next = state.projects.slice();
+      next[idx] = { ...next[idx], ...projectFromBrief(brief) };
+      return { projects: next };
+    });
+  },
+
+  /// Mirror the FK SET NULL detach so the sidebar reflects reality
+  /// without a hydrate round-trip. `detachedSessionIds` could be used
+  /// to be precise but iterating sessions is cheap and tolerates any
+  /// drift between the snapshot the socket handler took and the GUI's
+  /// local view.
+  applyExternalProjectDeleted: (projectId) => {
+    set((state) => ({
+      projects: state.projects.filter((p) => p.id !== projectId),
+      sessions: state.sessions.map((s) =>
+        s.projectId === projectId ? { ...s, projectId: undefined } : s,
+      ),
+      activeProjectFilter:
+        state.activeProjectFilter === projectId
+          ? undefined
+          : state.activeProjectFilter,
+    }));
   },
 
   // ---- hydrate / dev ----
