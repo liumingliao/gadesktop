@@ -1,5 +1,6 @@
 pub mod api;
 pub mod db;
+pub mod discovery;
 pub mod error;
 pub mod ipc;
 pub mod runner_commands;
@@ -411,6 +412,50 @@ pub fn run() {
                     }
                     Err(e) => {
                         eprintln!("[socket] start failed (non-fatal): {e}");
+                    }
+                }
+            }
+
+            // Discovery file write (B4 M3 T3.1). Supervisor SOPs read
+            // `~/.config/galley/cli-path` (macOS/Linux) or
+            // `%APPDATA%\galley\cli-path` (Windows) to find the CLI
+            // binary's absolute path. All branches non-fatal — Galley
+            // works without it; only SOPs are affected.
+            {
+                use crate::discovery::{write_discovery_file, DiscoveryOutcome};
+                match write_discovery_file() {
+                    DiscoveryOutcome::Written { path, cli_path } => {
+                        eprintln!(
+                            "[discovery] wrote {} → {}",
+                            path.display(),
+                            cli_path.display()
+                        );
+                    }
+                    DiscoveryOutcome::NoOp { path } => {
+                        eprintln!("[discovery] {} already up-to-date", path.display());
+                    }
+                    DiscoveryOutcome::CliBinaryNotFound { searched } => {
+                        eprintln!(
+                            "[discovery] CLI binary not found at {} — supervisor SOPs will fail discovery until the galley binary is built / bundled alongside Galley Core (M3 follow-up: Tauri externalBin config)",
+                            searched.display()
+                        );
+                    }
+                    DiscoveryOutcome::ConfigDirUnresolvable { reason } => {
+                        eprintln!(
+                            "[discovery] config dir unresolvable: {reason} — discovery file not written"
+                        );
+                    }
+                    DiscoveryOutcome::MkdirFailed { path, reason } => {
+                        eprintln!(
+                            "[discovery] mkdir {} failed: {reason}",
+                            path.display()
+                        );
+                    }
+                    DiscoveryOutcome::WriteFailed { path, reason } => {
+                        eprintln!(
+                            "[discovery] write {} failed: {reason}",
+                            path.display()
+                        );
                     }
                 }
             }
