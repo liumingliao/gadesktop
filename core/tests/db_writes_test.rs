@@ -970,3 +970,191 @@ async fn delete_project_not_found() {
         .expect_err("missing");
     assert!(matches!(err, GalleyError::NotFound { .. }));
 }
+
+// ============= B4 M1 · transaction-aware variant tests =============
+
+#[tokio::test]
+async fn tx_commit_persists_both_session_and_message() {
+    // O1 atomicity happy path: session new socket handler's two writes
+    // (create_session_in_tx + send_message_in_tx) inside one tx, COMMIT,
+    // both rows visible.
+    let pool = fresh_pool().await;
+    let galley = SqliteGalley::from_pool(pool.clone());
+    let mut tx = galley.begin_tx().await.expect("begin");
+    let session_brief = galley
+        .create_session_in_tx(
+            &mut tx,
+            CreateSessionInput {
+                id: "sess_tx_1".into(),
+                title: "From CLI session.new".into(),
+                project_id: None,
+                selected_llm_index: None,
+                selected_llm_display_name: None,
+            },
+            Origin::cli(Some("ga-claude".into()), Some("user asked".into())),
+        )
+        .await
+        .expect("create in tx");
+    assert_eq!(session_brief.id.as_str(), "sess_tx_1");
+    let msg_brief = galley
+        .send_message_in_tx(
+            &mut tx,
+            sid("sess_tx_1"),
+            "fix auth bug".to_string(),
+            Origin::cli(Some("ga-claude".into()), Some("user asked".into())),
+        )
+        .await
+        .expect("send in tx");
+    assert_eq!(msg_brief.content, "fix auth bug");
+    tx.commit().await.expect("commit");
+
+    // Both rows must be visible after commit.
+    let session_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM sessions WHERE id = ?")
+        .bind("sess_tx_1")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(session_count, 1, "session row should be persisted");
+    let msg_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM messages WHERE session_id = ?")
+        .bind("sess_tx_1")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(msg_count, 1, "first message should be persisted");
+}
+
+#[tokio::test]
+async fn tx_drop_without_commit_rolls_back() {
+    // O1 atomicity invariant: drop the tx without commit → ROLLBACK,
+    // no row in DB. This is what happens when the second in-tx call
+    // fails and the socket handler returns early.
+    let pool = fresh_pool().await;
+    let galley = SqliteGalley::from_pool(pool.clone());
+    {
+        let mut tx = galley.begin_tx().await.expect("begin");
+        galley
+            .create_session_in_tx(
+                &mut tx,
+                CreateSessionInput {
+                    id: "sess_tx_doomed".into(),
+                    title: "Will be rolled back".into(),
+                    project_id: None,
+                    selected_llm_index: None,
+                    selected_llm_display_name: None,
+                },
+                Origin::gui(),
+            )
+            .await
+            .expect("create in tx");
+        // Intentionally drop `tx` without calling .commit(). sqlx
+        // issues ROLLBACK in Transaction's Drop impl.
+    }
+    let session_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM sessions WHERE id = ?")
+        .bind("sess_tx_doomed")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(session_count, 0, "session row must NOT be persisted (rollback)");
+}
+
+#[tokio::test]
+async fn tx_second_call_fails_first_rolls_back_when_dropped() {
+    // O1 atomicity worst case: create_session_in_tx succeeds, then
+    // send_message_in_tx fails (we send to a non-existent session id,
+    // simulating any in-tx error). Caller drops tx without commit;
+    // verify the created session is NOT in DB.
+    let pool = fresh_pool().await;
+    let galley = SqliteGalley::from_pool(pool.clone());
+    {
+        let mut tx = galley.begin_tx().await.expect("begin");
+        galley
+            .create_session_in_tx(
+                &mut tx,
+                CreateSessionInput {
+                    id: "sess_atomic_1".into(),
+                    title: "Atomic create".into(),
+                    project_id: None,
+                    selected_llm_index: None,
+                    selected_llm_display_name: None,
+                },
+                Origin::gui(),
+            )
+            .await
+            .expect("create in tx");
+        let err = galley
+            .send_message_in_tx(
+                &mut tx,
+                sid("nonexistent_session"),
+                "this should fail".to_string(),
+                Origin::gui(),
+            )
+            .await
+            .expect_err("send to missing session");
+        assert!(matches!(err, GalleyError::NotFound { .. }));
+        // Drop tx without commit.
+    }
+    let session_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM sessions WHERE id = ?")
+        .bind("sess_atomic_1")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        session_count, 0,
+        "first in-tx write must roll back when second fails + tx dropped"
+    );
+}
+
+// ============= B4 M1 · get_pref_json tests =============
+
+#[tokio::test]
+async fn get_pref_json_returns_none_for_missing_key() {
+    let pool = fresh_pool().await;
+    let galley = SqliteGalley::from_pool(pool);
+    let v = galley
+        .get_pref_json("never_written")
+        .await
+        .expect("get_pref ok");
+    assert!(v.is_none());
+}
+
+#[tokio::test]
+async fn get_pref_json_round_trips_llm_list_shape() {
+    // Mirror the GUI shape: setPref<LLMOption[]>("llm_list", [...]).
+    // Stored value is JSON.stringify(...) string. get_pref_json
+    // parses it back to serde_json::Value.
+    let pool = fresh_pool().await;
+    sqlx::query("INSERT INTO prefs (key, value, updated_at) VALUES (?, ?, '2026-05-20T00:00:00Z')")
+        .bind("llm_list")
+        .bind(r#"[{"index":0,"name":"glm-4.5-x"},{"index":1,"name":"claude-sonnet-4-6"}]"#)
+        .execute(&pool)
+        .await
+        .expect("seed pref");
+    let galley = SqliteGalley::from_pool(pool);
+    let v = galley
+        .get_pref_json("llm_list")
+        .await
+        .expect("get_pref ok")
+        .expect("present");
+    let arr = v.as_array().expect("array");
+    assert_eq!(arr.len(), 2);
+    assert_eq!(arr[0]["index"], 0);
+    assert_eq!(arr[0]["name"], "glm-4.5-x");
+    assert_eq!(arr[1]["index"], 1);
+}
+
+#[tokio::test]
+async fn get_pref_json_rejects_corrupt_value() {
+    let pool = fresh_pool().await;
+    sqlx::query("INSERT INTO prefs (key, value, updated_at) VALUES (?, ?, '2026-05-20T00:00:00Z')")
+        .bind("broken")
+        .bind("{not valid json")
+        .execute(&pool)
+        .await
+        .expect("seed pref");
+    let galley = SqliteGalley::from_pool(pool);
+    let err = galley
+        .get_pref_json("broken")
+        .await
+        .expect_err("should reject");
+    assert!(matches!(err, GalleyError::InvalidArgs { .. }));
+}

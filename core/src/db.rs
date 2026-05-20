@@ -21,7 +21,7 @@ use std::path::PathBuf;
 use async_trait::async_trait;
 use directories::ProjectDirs;
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
-use sqlx::{FromRow, SqlitePool};
+use sqlx::{FromRow, Sqlite, SqliteConnection, SqlitePool, Transaction};
 
 use crate::api::{
     CreateProjectInput, CreateSessionInput, GalleyApi, HealthCheck, HealthReport, HealthStatus,
@@ -304,6 +304,155 @@ fn map_constraint_err(context: &str, e: sqlx::Error) -> GalleyError {
         }
     }
     map_sqlx_err(e)
+}
+
+// ---------------- B4 M1 · transaction-aware inner helpers ----------------
+//
+// The owned-pool trait methods (`create_session`, `send_message`) and
+// the transaction-aware variants (`*_in_tx`, B4 M1 O1 resolution for
+// `session.new` atomicity) share these inner helpers. Both take
+// `&mut SqliteConnection` — callers acquire the connection from the
+// pool or from a `Transaction` via deref.
+//
+// The helpers return fully-populated `SessionBrief` / `MessageBrief`
+// without an extra SELECT — every field is known from the input +
+// server-side `now` + table defaults.
+
+/// INSERT a session row. Validates `title` + `id` non-empty (matches
+/// the existing `create_session` rules); maps PK / FK / CHECK
+/// violations to `invalid_args` via `map_constraint_err`.
+async fn insert_session_row_inner(
+    conn: &mut SqliteConnection,
+    input: &CreateSessionInput,
+    origin: &Origin,
+) -> Result<SessionBrief> {
+    let title = input.title.trim();
+    if title.is_empty() {
+        return Err(GalleyError::InvalidArgs {
+            message: "create_session: title must not be empty".into(),
+        });
+    }
+    let id = input.id.trim();
+    if id.is_empty() {
+        return Err(GalleyError::InvalidArgs {
+            message: "create_session: id must not be empty".into(),
+        });
+    }
+    let now = chrono_now_iso();
+    let llm_idx: Option<i64> = input.selected_llm_index.map(|v| v as i64);
+    sqlx::query(
+        "INSERT INTO sessions (id, project_id, title, status, summary, turn_count, \
+            pending_approval_count, error_count, pinned, has_unread, \
+            llm_index, llm_display_name, last_activity_at, created_at, updated_at, \
+            created_via, created_by_supervisor, created_origin_note) \
+         VALUES (?, ?, ?, 'idle', NULL, 0, 0, 0, 0, 0, ?, ?, ?, ?, ?, ?, ?, ?)",
+    )
+    .bind(id)
+    .bind(&input.project_id)
+    .bind(title)
+    .bind(llm_idx)
+    .bind(&input.selected_llm_display_name)
+    .bind(&now)
+    .bind(&now)
+    .bind(&now)
+    .bind(origin.via.as_sql())
+    .bind(&origin.supervisor)
+    .bind(&origin.reason)
+    .execute(&mut *conn)
+    .await
+    .map_err(|e| map_constraint_err("create_session", e))?;
+
+    Ok(SessionBrief {
+        id: SessionId(id.to_string()),
+        project_id: input.project_id.clone(),
+        title: title.to_string(),
+        status: SessionStatus::Idle,
+        summary: None,
+        turn_count: Some(0),
+        last_activity_at: now.clone(),
+        created_at: now.clone(),
+        updated_at: now,
+        pinned: Some(false),
+        has_unread: Some(false),
+        selected_llm_index: input.selected_llm_index,
+        selected_llm_display_name: input.selected_llm_display_name.clone(),
+    })
+}
+
+/// INSERT a user message row + bump session `last_activity_at`.
+/// Validates target session exists and isn't archived (both happen
+/// inside whatever connection / tx the caller provides, so a
+/// concurrent archive can't sneak between check and write when the
+/// caller uses a transaction).
+async fn insert_user_message_inner(
+    conn: &mut SqliteConnection,
+    session_id: SessionId,
+    content: String,
+    origin: Origin,
+) -> Result<MessageBrief> {
+    let row: Option<(String, String)> =
+        sqlx::query_as("SELECT id, status FROM sessions WHERE id = ?")
+            .bind(&session_id.0)
+            .fetch_optional(&mut *conn)
+            .await
+            .map_err(map_sqlx_err)?;
+    let (_id, status) = row.ok_or_else(|| GalleyError::NotFound {
+        message: format!("session '{}' does not exist", session_id.0),
+    })?;
+    if status == "archived" {
+        return Err(GalleyError::InvalidArgs {
+            message: format!("session {} is archived", session_id.0),
+        });
+    }
+    let next_turn: i64 = sqlx::query_scalar(
+        "SELECT COALESCE(MAX(turn_index), -1) + 1 FROM messages WHERE session_id = ?",
+    )
+    .bind(&session_id.0)
+    .fetch_one(&mut *conn)
+    .await
+    .map_err(map_sqlx_err)?;
+    let now = chrono_now_iso();
+    let msg_id = format!(
+        "msg_{}_{}",
+        now.replace([':', '-', '.', 'T', '+'], ""),
+        next_turn
+    );
+    sqlx::query(
+        "INSERT INTO messages \
+         (id, session_id, turn_index, sequence, role, content, created_at, \
+          created_via, supervisor, origin_note) \
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    )
+    .bind(&msg_id)
+    .bind(&session_id.0)
+    .bind(next_turn)
+    .bind(0_i64)
+    .bind("user")
+    .bind(&content)
+    .bind(&now)
+    .bind(origin.via.as_sql())
+    .bind(&origin.supervisor)
+    .bind(&origin.reason)
+    .execute(&mut *conn)
+    .await
+    .map_err(map_sqlx_err)?;
+    sqlx::query("UPDATE sessions SET last_activity_at = ?, updated_at = ? WHERE id = ?")
+        .bind(&now)
+        .bind(&now)
+        .bind(&session_id.0)
+        .execute(&mut *conn)
+        .await
+        .map_err(map_sqlx_err)?;
+    Ok(MessageBrief {
+        id: MessageId(msg_id),
+        session_id,
+        role: MessageRole::User,
+        content,
+        created_at: now,
+        summary: None,
+        turn_index: Some(next_turn.max(0) as u32),
+        origin: Some(origin),
+    })
 }
 
 /// Server-side title fallback. Mirrors the GUI's
@@ -657,90 +806,12 @@ impl GalleyApi for SqliteGalley {
         content: String,
         origin: crate::api::Origin,
     ) -> Result<MessageBrief> {
-        // Validate target session exists + isn't archived. Cheap up-front
-        // check — fails fast for malformed CLI calls, avoids a partial
-        // write where the message row exists but the runner never sees it.
-        let row: Option<(String, String)> = sqlx::query_as(
-            "SELECT id, status FROM sessions WHERE id = ?",
-        )
-        .bind(&session_id.0)
-        .fetch_optional(&self.pool)
-        .await
-        .map_err(map_sqlx_err)?;
-
-        let (_id, status) = row.ok_or_else(|| GalleyError::NotFound {
-            message: format!("session '{}' does not exist", session_id.0),
-        })?;
-        if status == "archived" {
-            return Err(GalleyError::InvalidArgs {
-                message: format!("session {} is archived", session_id.0),
-            });
-        }
-
-        // Next turn_index = max(messages.turn_index) + 1. Reads concurrent
-        // with another writer could pick the same turn_index — but SQLite's
-        // WAL + the messages PK (id) means only one writer wins. For B2
-        // M4 the only writers are GUI (one at a time via Composer) + CLI
-        // (one at a time per session); race window narrow.
-        let next_turn: i64 = sqlx::query_scalar(
-            "SELECT COALESCE(MAX(turn_index), -1) + 1 FROM messages WHERE session_id = ?",
-        )
-        .bind(&session_id.0)
-        .fetch_one(&self.pool)
-        .await
-        .map_err(map_sqlx_err)?;
-
-        // Server-assigned id + timestamp. Format matches the existing
-        // GUI convention (`msg_<random>` — see runner/workbench_bridge.py).
-        // Using a UUIDv4 here would be cleaner but introduces a new dep
-        // for ~36 chars of randomness; for now we use a timestamp +
-        // counter pseudo-id good enough to be unique within a session.
-        // Replace with uuid in B3 when we have the dep there anyway.
-        let now = chrono_now_iso();
-        let msg_id = format!("msg_{}_{}", now.replace([':', '-', '.', 'T', '+'], ""), next_turn);
-
-        sqlx::query(
-            "INSERT INTO messages \
-             (id, session_id, turn_index, sequence, role, content, created_at, \
-              created_via, supervisor, origin_note) \
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        )
-        .bind(&msg_id)
-        .bind(&session_id.0)
-        .bind(next_turn)
-        .bind(0_i64)
-        .bind("user")
-        .bind(&content)
-        .bind(&now)
-        .bind(origin.via.as_sql())
-        .bind(&origin.supervisor)
-        .bind(&origin.reason)
-        .execute(&self.pool)
-        .await
-        .map_err(map_sqlx_err)?;
-
-        // Touch session.last_activity_at so the sidebar sort surfaces
-        // this session at the top.
-        sqlx::query(
-            "UPDATE sessions SET last_activity_at = ?, updated_at = ? WHERE id = ?",
-        )
-        .bind(&now)
-        .bind(&now)
-        .bind(&session_id.0)
-        .execute(&self.pool)
-        .await
-        .map_err(map_sqlx_err)?;
-
-        Ok(MessageBrief {
-            id: MessageId(msg_id),
-            session_id,
-            role: crate::api::message::MessageRole::User,
-            content,
-            created_at: now,
-            summary: None,
-            turn_index: Some(next_turn.max(0) as u32),
-            origin: Some(origin),
-        })
+        // Thin wrapper: acquire a pool connection and delegate to the
+        // shared inner helper. The `_in_tx` sibling reuses the same
+        // helper so SQL + validation lives in one place. See
+        // [insert_user_message_inner] for the body.
+        let mut conn = self.pool.acquire().await.map_err(map_sqlx_err)?;
+        insert_user_message_inner(&mut conn, session_id, content, origin).await
     }
 
     // ============= B3 M4a · session writes =============
@@ -750,42 +821,12 @@ impl GalleyApi for SqliteGalley {
         input: CreateSessionInput,
         origin: Origin,
     ) -> Result<SessionBrief> {
-        let title = input.title.trim();
-        if title.is_empty() {
-            return Err(GalleyError::InvalidArgs {
-                message: "create_session: title must not be empty".into(),
-            });
-        }
-        let id = input.id.trim();
-        if id.is_empty() {
-            return Err(GalleyError::InvalidArgs {
-                message: "create_session: id must not be empty".into(),
-            });
-        }
-        let now = chrono_now_iso();
-        let llm_idx: Option<i64> = input.selected_llm_index.map(|v| v as i64);
-        sqlx::query(
-            "INSERT INTO sessions (id, project_id, title, status, summary, turn_count, \
-                pending_approval_count, error_count, pinned, has_unread, \
-                llm_index, llm_display_name, last_activity_at, created_at, updated_at, \
-                created_via, created_by_supervisor, created_origin_note) \
-             VALUES (?, ?, ?, 'idle', NULL, 0, 0, 0, 0, 0, ?, ?, ?, ?, ?, ?, ?, ?)",
-        )
-        .bind(id)
-        .bind(&input.project_id)
-        .bind(title)
-        .bind(llm_idx)
-        .bind(&input.selected_llm_display_name)
-        .bind(&now)
-        .bind(&now)
-        .bind(&now)
-        .bind(origin.via.as_sql())
-        .bind(&origin.supervisor)
-        .bind(&origin.reason)
-        .execute(&self.pool)
-        .await
-        .map_err(|e| map_constraint_err("create_session", e))?;
-        self.session_brief(SessionId(id.to_string())).await
+        // Thin wrapper: acquire a pool connection and delegate to the
+        // shared inner helper. The `_in_tx` sibling reuses the same
+        // helper so SQL + validation lives in one place. See
+        // [insert_session_row_inner] for the body.
+        let mut conn = self.pool.acquire().await.map_err(map_sqlx_err)?;
+        insert_session_row_inner(&mut conn, &input, &origin).await
     }
 
     async fn archive_session(&self, id: SessionId, _origin: Origin) -> Result<SessionBrief> {
@@ -1262,6 +1303,54 @@ impl GalleyApi for SqliteGalley {
             });
         }
         Ok(())
+    }
+
+    // ---------------- B4 M1 · transaction-aware variants ----------------
+
+    async fn create_session_in_tx<'c>(
+        &self,
+        tx: &mut Transaction<'c, Sqlite>,
+        input: CreateSessionInput,
+        origin: Origin,
+    ) -> Result<SessionBrief> {
+        insert_session_row_inner(tx, &input, &origin).await
+    }
+
+    async fn send_message_in_tx<'c>(
+        &self,
+        tx: &mut Transaction<'c, Sqlite>,
+        session_id: SessionId,
+        content: String,
+        origin: Origin,
+    ) -> Result<MessageBrief> {
+        insert_user_message_inner(tx, session_id, content, origin).await
+    }
+
+    async fn begin_tx(&self) -> Result<Transaction<'_, Sqlite>> {
+        self.pool.begin().await.map_err(map_sqlx_err)
+    }
+
+    // ---------------- B4 M1 · generic prefs read ----------------
+
+    async fn get_pref_json(&self, key: &str) -> Result<Option<serde_json::Value>> {
+        // The `prefs` table is `(key TEXT PRIMARY KEY, value TEXT NOT NULL)`
+        // where `value` is a JSON-encoded string (GUI's setPref does
+        // `JSON.stringify`). We return the parsed Value so callers
+        // don't have to think about double-encoding.
+        let row: Option<(String,)> = sqlx::query_as("SELECT value FROM prefs WHERE key = ?")
+            .bind(key)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(map_sqlx_err)?;
+        let Some((raw,)) = row else {
+            return Ok(None);
+        };
+        let value = serde_json::from_str::<serde_json::Value>(&raw).map_err(|e| {
+            GalleyError::InvalidArgs {
+                message: format!("pref '{key}' stored value is not valid JSON: {e}"),
+            }
+        })?;
+        Ok(Some(value))
     }
 }
 

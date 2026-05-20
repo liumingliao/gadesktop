@@ -271,4 +271,59 @@ pub trait GalleyApi: Send + Sync {
     ///
     /// **Errors**: `not_found`.
     async fn delete_project(&self, id: ProjectId, origin: Origin) -> Result<()>;
+
+    // ---------------- B4 M1 · transaction-aware variants ----------------
+    //
+    // `session.new` (B4 M1) atomically persists a session + its first
+    // message in a single SQLite transaction (sub-plan O1 resolution).
+    // The `_in_tx` siblings of `create_session` and `send_message` take
+    // a borrowed `Transaction` so the socket handler can wrap both
+    // writes with a single BEGIN / COMMIT (or ROLLBACK on failure).
+    //
+    // The owned-pool variants above stay byte-identical for GUI Tauri
+    // command callers — only `session.new` socket handler uses these
+    // tx variants. Implementation reuses shared inner helpers so SQL +
+    // validation logic is single-sourced.
+
+    /// Same as [`Self::create_session`] but writes through a caller-owned
+    /// transaction. The caller is responsible for `commit()` or letting
+    /// the tx drop to roll back.
+    async fn create_session_in_tx<'c>(
+        &self,
+        tx: &mut sqlx::Transaction<'c, sqlx::Sqlite>,
+        input: CreateSessionInput,
+        origin: Origin,
+    ) -> Result<SessionBrief>;
+
+    /// Same as [`Self::send_message`] but writes through a caller-owned
+    /// transaction. Validation (session exists, not archived) runs
+    /// inside the same tx so a concurrent archive can't sneak in
+    /// between check and write.
+    async fn send_message_in_tx<'c>(
+        &self,
+        tx: &mut sqlx::Transaction<'c, sqlx::Sqlite>,
+        session_id: SessionId,
+        content: String,
+        origin: Origin,
+    ) -> Result<MessageBrief>;
+
+    /// Open a transaction against the underlying pool. Returned handle is
+    /// the socket handler's BEGIN; calling `.commit()` is the COMMIT,
+    /// dropping it without commit triggers ROLLBACK.
+    ///
+    /// Exposed on the trait so socket handlers can wrap multiple
+    /// `_in_tx` calls without holding a concrete `SqliteGalley` ref.
+    async fn begin_tx(&self) -> Result<sqlx::Transaction<'_, sqlx::Sqlite>>;
+
+    // ---------------- B4 M1 · generic prefs read ----------------
+    //
+    // The CLI's `llm list` (M1.3) reads the `llm_list` pref cache that
+    // GUI writes after warmup. Generic read keeps the SQL in one place
+    // and lets future prefs reads (B4 M3 supervisor discovery, etc.)
+    // reuse the same path without per-key trait methods.
+
+    /// Read a JSON-encoded pref. Returns `None` if the key is absent;
+    /// `Err(InvalidArgs)` if the stored value can't deserialize to `T`
+    /// (means GUI wrote a different shape — schema drift signal).
+    async fn get_pref_json(&self, key: &str) -> Result<Option<serde_json::Value>>;
 }

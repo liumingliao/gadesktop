@@ -12,6 +12,10 @@ pub enum GalleyError {
     InvalidArgs { message: String },
     /// Database / backend unavailable. CLI exit code 4.
     DbUnavailable { message: String },
+    /// Runner subprocess unreachable / IPC dispatch failed after persist
+    /// succeeded (e.g. `session btw` with no live bridge, or `llm set`
+    /// emit failed mid-flight). CLI exit code 5 (B4 M1; PRD §11.2 #3).
+    RunnerError { message: String },
     /// Catch-all for unexpected internal failures. CLI exit code 1.
     Internal { message: String },
 }
@@ -22,6 +26,7 @@ impl std::fmt::Display for GalleyError {
             GalleyError::NotFound { message } => write!(f, "not_found: {message}"),
             GalleyError::InvalidArgs { message } => write!(f, "invalid_args: {message}"),
             GalleyError::DbUnavailable { message } => write!(f, "db_unavailable: {message}"),
+            GalleyError::RunnerError { message } => write!(f, "runner_error: {message}"),
             GalleyError::Internal { message } => write!(f, "internal: {message}"),
         }
     }

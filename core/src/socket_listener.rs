@@ -138,6 +138,50 @@ impl SocketResponse {
     }
 }
 
+// ---------------- shared dispatch helpers (B4 M1) ----------------
+
+/// Build an [`Origin`] from the supervisor + reason flags that every
+/// write socket command accepts. `via` flips to `Supervisor` when a
+/// supervisor label is present; otherwise `Cli`. Used by all B4 M1
+/// write handlers (`session.new` / `session.btw` / `session.stop` /
+/// `session.archive` / `session.restore` / `session.move` /
+/// `project.create` / `project.delete`) so the rule lives in one place.
+fn origin_from_args(supervisor: Option<String>, reason: Option<String>) -> Origin {
+    Origin {
+        via: if supervisor.is_some() {
+            OriginVia::Supervisor
+        } else {
+            OriginVia::Cli
+        },
+        supervisor,
+        reason,
+    }
+}
+
+/// Map a [`GalleyError`] onto the wire `SocketResponse` envelope.
+/// Each variant gets its own stable `error` discriminant string so
+/// `cli/src/main.rs::map_error_tag` can round-trip back to a typed
+/// error (and `exit_code_for` lands on the right exit category).
+fn map_galley_err(
+    request_id: Option<String>,
+    err: crate::error::GalleyError,
+) -> SocketResponse {
+    use crate::error::GalleyError;
+    match err {
+        GalleyError::NotFound { message } => SocketResponse::err(request_id, "not_found", message),
+        GalleyError::InvalidArgs { message } => {
+            SocketResponse::err(request_id, "invalid_args", message)
+        }
+        GalleyError::DbUnavailable { message } => {
+            SocketResponse::err(request_id, "db_unavailable", message)
+        }
+        GalleyError::RunnerError { message } => {
+            SocketResponse::err(request_id, "runner_error", message)
+        }
+        GalleyError::Internal { message } => SocketResponse::err(request_id, "internal", message),
+    }
+}
+
 /// Resolve the per-user socket path.
 ///
 /// - macOS/Linux: `${TMPDIR:-/tmp}/galley-${UID}.sock`
@@ -587,34 +631,14 @@ async fn dispatch_session_send(
             );
         }
     };
-    let origin = Origin {
-        via: if parsed.supervisor.is_some() {
-            OriginVia::Supervisor
-        } else {
-            OriginVia::Cli
-        },
-        supervisor: parsed.supervisor.clone(),
-        reason: parsed.reason.clone(),
-    };
+    let origin = origin_from_args(parsed.supervisor.clone(), parsed.reason.clone());
     let session_id = SessionId(parsed.session_id.clone());
     let brief = match galley
         .send_message(session_id, parsed.content.clone(), origin)
         .await
     {
         Ok(b) => b,
-        Err(crate::error::GalleyError::NotFound { message }) => {
-            return SocketResponse::err(request_id, "not_found", message);
-        }
-        Err(crate::error::GalleyError::InvalidArgs { message }) => {
-            return SocketResponse::err(request_id, "invalid_args", message);
-        }
-        Err(e) => {
-            return SocketResponse::err(
-                request_id,
-                "internal",
-                format!("send_message: {e}"),
-            );
-        }
+        Err(e) => return map_galley_err(request_id, e),
     };
 
     // 2. Best-effort dispatch to runner. If the session's runner isn't

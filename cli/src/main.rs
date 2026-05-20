@@ -152,6 +152,7 @@ fn exit_code_for(e: &GalleyError) -> u8 {
         GalleyError::NotFound { .. } => 3,
         GalleyError::InvalidArgs { .. } => 2,
         GalleyError::DbUnavailable { .. } => 4,
+        GalleyError::RunnerError { .. } => 5,
         GalleyError::Internal { .. } => 1,
     }
 }
@@ -504,6 +505,7 @@ fn map_error_tag(tag: &str, msg: String) -> GalleyError {
         "not_found" => GalleyError::NotFound { message: msg },
         "invalid_args" => GalleyError::InvalidArgs { message: msg },
         "db_unavailable" => GalleyError::DbUnavailable { message: msg },
+        "runner_error" => GalleyError::RunnerError { message: msg },
         _ => GalleyError::Internal { message: msg },
     }
 }
