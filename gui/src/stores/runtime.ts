@@ -8,10 +8,10 @@ import {
 } from "@/lib/bridge";
 import { setPref } from "@/lib/db";
 import {
-  DEMO_LLM_DISPLAY_NAME,
-  DEMO_LLMS,
-  DEMO_RUNTIME_INFO,
-} from "@/stores/demo";
+  DEFAULT_LLM_DISPLAY_NAME,
+  DEFAULT_LLMS,
+  DEFAULT_RUNTIME_INFO,
+} from "@/stores/defaults";
 import { useMessagesStore } from "@/stores/messages";
 import { usePrefsStore } from "@/stores/prefs";
 import { useSessionsStore } from "@/stores/sessions";
@@ -61,7 +61,7 @@ export interface PerSessionRuntime {
  * a runtime entry. Carry the session row's persisted `selectedLlm*`
  * fields so the pill renders correctly from t=0 — without these, the
  * picker flashes the cross-session hydrate-cached current LLM (or
- * DEMO_LLMS on first-ever startup) until bridge `ready` arrives.
+ * DEFAULT_LLMS on first-ever startup) until bridge `ready` arrives.
  */
 export interface RuntimeSeedHints {
   persistedIndex?: number;
@@ -85,7 +85,7 @@ interface RuntimeState {
    *
    * Used as the seed pool for `ensureRuntime` when a new session is
    * activated and has no byId entry yet. Without this, the picker
-   * would have to show DEMO_LLMS or wait for bridge ready — both
+   * would have to show DEFAULT_LLMS or wait for bridge ready — both
    * UX regressions captured in the M3a "pre-seed runtime" work.
    */
   cachedLLMs: LLMOption[];
@@ -180,7 +180,7 @@ interface RuntimeActions {
    * after loading the `llm_list` pref (latest snapshot from a prior
    * bridge spawn). Without this, the first activation in a new app
    * run would have no real LLM list to seed against and fall through
-   * to DEMO_LLMS.
+   * to DEFAULT_LLMS.
    */
   seedCachedLLMs: (list: LLMOption[]) => void;
 }
@@ -197,7 +197,7 @@ export type RuntimeStore = RuntimeState & RuntimeActions;
  *   2. Otherwise honour the cached list's own `isCurrent` (cross-
  *      session hydrate cache = whichever LLM was current last).
  *   3. If no cached list exists at all (first-ever cold start with
- *      no `llm_list` pref), fall through to DEMO_LLMS so the picker
+ *      no `llm_list` pref), fall through to DEFAULT_LLMS so the picker
  *      isn't empty during onboarding.
  */
 // ---- Module-level bridge resources (private to runtime slice) ----
@@ -260,8 +260,8 @@ function _bridgeFieldsUpdate(
   patch: Partial<Pick<PerSessionRuntime, "bridgeStatus" | "bridgeError" | "bridgePid">>,
 ): PerSessionRuntime {
   return {
-    llms: rt?.llms ?? DEMO_LLMS,
-    llmDisplayName: rt?.llmDisplayName ?? DEMO_LLM_DISPLAY_NAME,
+    llms: rt?.llms ?? DEFAULT_LLMS,
+    llmDisplayName: rt?.llmDisplayName ?? DEFAULT_LLM_DISPLAY_NAME,
     bridgeStatus: patch.bridgeStatus ?? rt?.bridgeStatus ?? "idle",
     bridgeError:
       patch.bridgeError !== undefined ? patch.bridgeError : (rt?.bridgeError ?? null),
@@ -279,8 +279,8 @@ function buildSeedRuntime(seed: RuntimeSeedHints): PerSessionRuntime {
   };
   if (cached.length === 0) {
     return {
-      llms: DEMO_LLMS,
-      llmDisplayName: DEMO_LLM_DISPLAY_NAME,
+      llms: DEFAULT_LLMS,
+      llmDisplayName: DEFAULT_LLM_DISPLAY_NAME,
       ...baseBridge,
     };
   }
@@ -295,7 +295,7 @@ function buildSeedRuntime(seed: RuntimeSeedHints): PerSessionRuntime {
     seed.persistedDisplayName ??
     seed.cachedDisplayName ??
     cached.find((l) => l.isCurrent)?.displayName ??
-    DEMO_LLM_DISPLAY_NAME;
+    DEFAULT_LLM_DISPLAY_NAME;
   return { llms, llmDisplayName, ...baseBridge };
 }
 
@@ -305,7 +305,7 @@ export const useRuntimeStore = create<RuntimeStore>((set, get) => ({
   cachedLLMDisplayName: "",
   pendingLLMIndex: undefined,
   petAttachedSessionId: null,
-  runtimeInfo: DEMO_RUNTIME_INFO,
+  runtimeInfo: DEFAULT_RUNTIME_INFO,
   _warmupComplete: false,
 
   ensureRuntime: (sid, seed) =>
@@ -340,7 +340,7 @@ export const useRuntimeStore = create<RuntimeStore>((set, get) => ({
     });
     // Cache LLM list to prefs so future cold-starts (before any
     // bridge has spawned) can show the real model names instead
-    // of the DEMO_LLMS seed. The LLM list is GA-install-wide
+    // of the DEFAULT_LLMS seed. The LLM list is GA-install-wide
     // (mykey.py is one file shared across sessions), so any one
     // bridge's `ready` event is a faithful snapshot.
     void setPref("llm_list", llms).catch((e) => {

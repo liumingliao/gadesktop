@@ -41,10 +41,11 @@ import { useSessionsStore } from "@/stores/sessions";
 import { useUiStore } from "@/stores/ui";
 
 export async function hydrateApp(): Promise<void> {
-  // 1. App version — replace the demo fixture's hardcoded
-  // workbenchVersion ("0.1.0", a lie since alpha.1) with the real
-  // value baked into tauri.conf.json at build time. Failing fetch
-  // keeps the demo value — not worth blocking hydration on this.
+  // 1. App version — replace the empty-string sentinel in
+  // DEFAULT_RUNTIME_INFO with the real value baked into
+  // tauri.conf.json at build time. Failing fetch leaves the empty
+  // string, which renders as `v` in Settings → About — a louder
+  // "something's wrong" than silently displaying a stale literal.
   try {
     const realVersion = await getVersion();
     useRuntimeStore
@@ -104,7 +105,7 @@ export async function hydrateApp(): Promise<void> {
 
   // 6. Restore cached LLM list (written by replaceLLMs whenever a
   // bridge's `ready` event arrives). Lets cold-start cosmetics show
-  // the user's real GA-configured models instead of DEMO_LLMS
+  // the user's real GA-configured models instead of DEFAULT_LLMS
   // before any bridge has spawned in this session. Lives outside
   // prefsStore — it's a short-term runtime hint, not a long-lived
   // preference.

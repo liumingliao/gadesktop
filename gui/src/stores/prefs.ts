@@ -3,7 +3,7 @@ import { create } from "zustand";
 import type { ApprovalConfig } from "@/components/screens/settings/Settings";
 import { getPref, setPref } from "@/lib/db";
 import { findCandidateByAlias } from "@/lib/python-probe";
-import { DEMO_APPROVAL_CONFIG, DEMO_GA_CONFIG } from "@/stores/demo";
+import { DEFAULT_APPROVAL_CONFIG, DEFAULT_GA_CONFIG } from "@/stores/defaults";
 import { useRuntimeStore } from "@/stores/runtime";
 import { useUiStore } from "@/stores/ui";
 import { makeAppError } from "@/types/app-error";
@@ -56,8 +56,8 @@ interface PrefsState {
    * (workbench repo root in dev / app bundle resources dir in
    * production — set by the macOS bundle Task).
    *
-   * Falls back to DEMO_GA_CONFIG on first launch before the user has
-   * opened Settings. Persists to pref `ga_config` (JSON).
+   * Falls back to DEFAULT_GA_CONFIG on first launch before the user
+   * has opened Settings. Persists to pref `ga_config` (JSON).
    */
   gaConfig: GAConfig;
 
@@ -155,8 +155,8 @@ export type PrefsStore = PrefsState & PrefsActions;
 
 export const usePrefsStore = create<PrefsStore>((set, get) => ({
   // ---- Initial state (demo fixtures until hydratePrefs) ----
-  gaConfig: DEMO_GA_CONFIG,
-  approvalConfig: DEMO_APPROVAL_CONFIG,
+  gaConfig: DEFAULT_GA_CONFIG,
+  approvalConfig: DEFAULT_APPROVAL_CONFIG,
   yoloMode: true,
   yoloIntroSeen: true,
   conversationWidth: "compact",
