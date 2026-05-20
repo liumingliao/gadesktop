@@ -407,6 +407,25 @@ interface SessionsActions {
    */
   setLastStepIndex: (sessionId: string, step: number) => void;
 
+  // ---- B4 M1 · external mirror entry points ----
+  //
+  // CLI / supervisor writes go through Galley Core's socket transport,
+  // which writes the SQLite row and then emits a Tauri event to notify
+  // the GUI. These actions are the listener-side mirrors: they update
+  // in-memory state to match the row that's already on disk, **without**
+  // invoking a Rust command back (the row is already correct). Mirror of
+  // `appendUserTurnExternal` over in messagesStore.
+
+  /** Insert a freshly-created (CLI / supervisor) session into the list.
+   * No-op if a row with the same id is already present — covers the
+   * narrow race where the GUI created it itself and the external event
+   * arrives second. */
+  applyExternalSessionCreated: (brief: SessionBriefWire) => void;
+  /** Patch the in-memory row from `session.archive` / `session.restore` /
+   * `session.move` socket emits. No-op if the id isn't known yet (will
+   * land via `applyExternalSessionCreated` first). */
+  applyExternalSessionUpdated: (brief: SessionBriefWire) => void;
+
   // ---- hydrate / dev ----
   /** Load sessions + projects from Rust core. Called by the cold-start
    * orchestrator at `lib/hydrate.ts`. Mutates state directly; errors
@@ -1095,6 +1114,56 @@ export const useSessionsStore = create<SessionsStore>((set, get) => ({
           return { ...s, lastStepIndex: step };
         },
       );
+      return changed ? { sessions } : {};
+    });
+  },
+
+  // ---- B4 M1 · external mirror entry points ----
+
+  applyExternalSessionCreated: (brief) => {
+    set((state) => {
+      // Race guard: GUI may have just created the same id locally. The
+      // SessionBriefWire from Rust is authoritative for durable fields
+      // (status / title / project_id) but the GUI's local insert already
+      // carries runtime-only defaults; replace in place when we find a
+      // match, otherwise prepend.
+      const idx = state.sessions.findIndex((s) => s.id === brief.id);
+      if (idx === -1) {
+        return { sessions: [sessionFromBrief(brief), ...state.sessions] };
+      }
+      const next = state.sessions.slice();
+      next[idx] = { ...next[idx], ...sessionFromBrief(brief) };
+      return { sessions: next };
+    });
+  },
+
+  applyExternalSessionUpdated: (brief) => {
+    set((state) => {
+      const { sessions, changed } = patchSessionInList(
+        state.sessions,
+        brief.id,
+        (s) => ({
+          ...s,
+          title: brief.title,
+          status: brief.status,
+          projectId: brief.projectId,
+          summary: brief.summary ?? s.summary,
+          turnCount: brief.turnCount ?? s.turnCount,
+          pinned: brief.pinned ?? s.pinned,
+          hasUnread: brief.hasUnread ?? s.hasUnread,
+          lastActivityAt: brief.lastActivityAt,
+          updatedAt: brief.updatedAt,
+        }),
+      );
+      // Clear active selection if the active session was just archived
+      // away from view (mirror archiveSession's existing behavior).
+      if (
+        changed &&
+        brief.status === "archived" &&
+        state.activeSessionId === brief.id
+      ) {
+        return { sessions, activeSessionId: undefined };
+      }
       return changed ? { sessions } : {};
     });
   },

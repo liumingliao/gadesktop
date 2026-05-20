@@ -107,6 +107,12 @@ function App() {
   const appendUserTurnExternal = useMessagesStore(
     (s) => s.appendUserTurnExternal,
   );
+  const applyExternalSessionCreated = useSessionsStore(
+    (s) => s.applyExternalSessionCreated,
+  );
+  const applyExternalSessionUpdated = useSessionsStore(
+    (s) => s.applyExternalSessionUpdated,
+  );
   // LLM / runtimeInfo / pet state now live in runtimeStore (M3a).
   // Subscribe to the active session's per-runtime entry so the
   // Composer pill + dropdown + Inspector tab re-render on changes.
@@ -321,6 +327,57 @@ function App() {
       unlisten?.();
     };
   }, [appendUserTurnExternal]);
+
+  // B4 M1 session-write listeners. Socket handlers in
+  // core/src/socket_listener.rs emit these whenever a CLI / supervisor
+  // command persists a session row; the GUI mirrors the row into its
+  // in-memory store so the sidebar updates without polling. The payload
+  // shape mirrors Rust's `SessionExternalPayload` — `session` is the
+  // freshly-read SessionBrief, `via` is the originating socket command.
+  //
+  // For `session.new`, the corresponding user message lands via the
+  // existing `user-message-persisted` event (emitted in the same
+  // handler) — kept as two events so a future supervisor agent can
+  // listen for one without the other.
+  useEffect(() => {
+    let cancelled = false;
+    const unlisteners: Array<() => void> = [];
+    type ExternalPayload = {
+      session: Parameters<typeof applyExternalSessionCreated>[0];
+      via: string;
+    };
+    void (async () => {
+      const subscribe = async (
+        event: string,
+        handler: (p: ExternalPayload) => void,
+      ) => {
+        const fn = await listen<ExternalPayload>(event, (e) =>
+          handler(e.payload),
+        );
+        if (cancelled) {
+          fn();
+        } else {
+          unlisteners.push(fn);
+        }
+      };
+      await subscribe("session-created-external", (p) =>
+        applyExternalSessionCreated(p.session),
+      );
+      await subscribe("session-archived-external", (p) =>
+        applyExternalSessionUpdated(p.session),
+      );
+      await subscribe("session-unarchived-external", (p) =>
+        applyExternalSessionUpdated(p.session),
+      );
+      await subscribe("session-moved-external", (p) =>
+        applyExternalSessionUpdated(p.session),
+      );
+    })();
+    return () => {
+      cancelled = true;
+      unlisteners.forEach((fn) => fn());
+    };
+  }, [applyExternalSessionCreated, applyExternalSessionUpdated]);
 
   // Conversation source-of-truth precedence:
   //   1. store.turns + store.pendingApprovals — populated by IPC

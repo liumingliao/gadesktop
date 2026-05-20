@@ -128,6 +128,98 @@ enum SessionCmd {
         /// Session id.
         id: String,
     },
+    /// Create a new session with a first user message (B4 M1). Atomic:
+    /// session row + first message commit together or roll back together.
+    /// Returns `{session, message, dispatch}` — `dispatch` is `dispatched`
+    /// when the runner subprocess was alive and received the message, or
+    /// `persisted_only` when there's no live bridge (CLI doesn't spawn
+    /// runners; the GUI or a subsequent `session send` warms them up).
+    New {
+        /// First user message. Doubles as the seed for title derivation
+        /// after the bridge finishes the first turn.
+        task: String,
+        /// Optional project id. Session is detached (ungrouped) if omitted.
+        #[arg(long)]
+        project: Option<String>,
+        /// Optional LLM display name (case-insensitive). Resolved against
+        /// the `llm_list` pref cached by the GUI after warmup; if the
+        /// cache is empty or the name is unknown, exits 2 (invalid args).
+        #[arg(long)]
+        llm: Option<String>,
+        /// Supervisor label — agent identity / SOP name. Sets origin via
+        /// to `supervisor`; omit for via=`cli`.
+        #[arg(long)]
+        supervisor: Option<String>,
+        /// Free-text reason for the action. Surfaces in audit views.
+        #[arg(long)]
+        reason: Option<String>,
+    },
+    /// Send a transient "by the way" side question into a running session
+    /// (B4 M1). The runner detects the `/btw` prefix and bypasses its
+    /// task queue — useful for asking the agent a quick question mid-run
+    /// without disturbing the main thread. Not persisted to the messages
+    /// table (v0.1 transient policy); requires an alive bridge (exit 5
+    /// otherwise).
+    Btw {
+        /// Session id.
+        id: String,
+        /// Side question body.
+        question: String,
+        #[arg(long)]
+        supervisor: Option<String>,
+        #[arg(long)]
+        reason: Option<String>,
+    },
+    /// Stop the current turn in a session (B4 M1). Sends `Abort` to the
+    /// runner — the agent's loop exits and emits `run_complete` with the
+    /// `ABORTED` marker, but the bridge process stays alive so a
+    /// subsequent `session send` resumes without paying the respawn cost.
+    /// Idempotent: stopping an already-idle session returns
+    /// `{dispatch: "already_stopped"}` and exit 0.
+    Stop {
+        /// Session id.
+        id: String,
+        #[arg(long)]
+        supervisor: Option<String>,
+        #[arg(long)]
+        reason: Option<String>,
+    },
+    /// Archive a session — flips status to `archived` and hides it from
+    /// the GUI sidebar's active list. Reversible via `session restore`.
+    Archive {
+        /// Session id.
+        id: String,
+        #[arg(long)]
+        supervisor: Option<String>,
+        #[arg(long)]
+        reason: Option<String>,
+    },
+    /// Restore (unarchive) a previously archived session. Flips status
+    /// from `archived` back to `idle`; no-op if the session wasn't
+    /// archived.
+    Restore {
+        /// Session id.
+        id: String,
+        #[arg(long)]
+        supervisor: Option<String>,
+        #[arg(long)]
+        reason: Option<String>,
+    },
+    /// Move a session into / out of a project (B4 M1). `--to=<project-id>`
+    /// attaches; omit `--to` to detach (move to ungrouped). The session is
+    /// the subject of the move — projects don't shuffle, sessions migrate
+    /// between them (sub-plan O3 noun-as-subject grammar).
+    Move {
+        /// Session id.
+        id: String,
+        /// Target project id. Omit to detach from any project.
+        #[arg(long)]
+        to: Option<String>,
+        #[arg(long)]
+        supervisor: Option<String>,
+        #[arg(long)]
+        reason: Option<String>,
+    },
 }
 
 #[tokio::main]
@@ -222,6 +314,40 @@ async fn run(cli: Cli) -> Result<(), GalleyError> {
             reason,
         }) => session_send(id, content, supervisor, reason).await,
         Command::Session(SessionCmd::Watch { id }) => session_watch(id).await,
+        Command::Session(SessionCmd::New {
+            task,
+            project,
+            llm,
+            supervisor,
+            reason,
+        }) => session_new(task, project, llm, supervisor, reason).await,
+        Command::Session(SessionCmd::Btw {
+            id,
+            question,
+            supervisor,
+            reason,
+        }) => session_btw(id, question, supervisor, reason).await,
+        Command::Session(SessionCmd::Stop {
+            id,
+            supervisor,
+            reason,
+        }) => session_stop(id, supervisor, reason).await,
+        Command::Session(SessionCmd::Archive {
+            id,
+            supervisor,
+            reason,
+        }) => session_archive(id, supervisor, reason).await,
+        Command::Session(SessionCmd::Restore {
+            id,
+            supervisor,
+            reason,
+        }) => session_restore(id, supervisor, reason).await,
+        Command::Session(SessionCmd::Move {
+            id,
+            to,
+            supervisor,
+            reason,
+        }) => session_move(id, to, supervisor, reason).await,
         Command::Status => {
             let galley = SqliteGalley::open().await?;
             let s = galley.status().await?;
@@ -496,6 +622,136 @@ async fn session_watch(id: String) -> Result<(), GalleyError> {
         }
     }
     Ok(())
+}
+
+/// Shared socket round-trip for the unary write commands (`session.new`,
+/// `session.btw`, `session.stop`, `session.archive`, `session.restore`,
+/// `session.move`). All return JSON-shaped success payloads, so we just
+/// pass the `result` field through to stdout.
+async fn unary_command(req: serde_json::Value) -> Result<(), GalleyError> {
+    let resp_line = socket_send_recv(req).await?;
+    let parsed: serde_json::Value =
+        serde_json::from_str(&resp_line).map_err(|e| GalleyError::Internal {
+            message: format!("malformed socket response: {e}"),
+        })?;
+    if parsed["ok"] == serde_json::Value::Bool(true) {
+        println!("{}", parsed["result"]);
+        Ok(())
+    } else {
+        let tag = parsed["error"].as_str().unwrap_or("internal");
+        let msg = parsed["message"].as_str().unwrap_or("").to_string();
+        Err(map_error_tag(tag, msg))
+    }
+}
+
+async fn session_new(
+    task: String,
+    project: Option<String>,
+    llm: Option<String>,
+    supervisor: Option<String>,
+    reason: Option<String>,
+) -> Result<(), GalleyError> {
+    let req = serde_json::json!({
+        "command": "session.new",
+        "args": {
+            "task": task,
+            "projectId": project,
+            "llmName": llm,
+            "supervisor": supervisor,
+            "reason": reason,
+        },
+        "schemaVersion": SCHEMA_VERSION,
+    });
+    unary_command(req).await
+}
+
+async fn session_btw(
+    id: String,
+    question: String,
+    supervisor: Option<String>,
+    reason: Option<String>,
+) -> Result<(), GalleyError> {
+    let req = serde_json::json!({
+        "command": "session.btw",
+        "args": {
+            "sessionId": id,
+            "question": question,
+            "supervisor": supervisor,
+            "reason": reason,
+        },
+        "schemaVersion": SCHEMA_VERSION,
+    });
+    unary_command(req).await
+}
+
+async fn session_stop(
+    id: String,
+    supervisor: Option<String>,
+    reason: Option<String>,
+) -> Result<(), GalleyError> {
+    let req = serde_json::json!({
+        "command": "session.stop",
+        "args": {
+            "sessionId": id,
+            "supervisor": supervisor,
+            "reason": reason,
+        },
+        "schemaVersion": SCHEMA_VERSION,
+    });
+    unary_command(req).await
+}
+
+async fn session_archive(
+    id: String,
+    supervisor: Option<String>,
+    reason: Option<String>,
+) -> Result<(), GalleyError> {
+    let req = serde_json::json!({
+        "command": "session.archive",
+        "args": {
+            "sessionId": id,
+            "supervisor": supervisor,
+            "reason": reason,
+        },
+        "schemaVersion": SCHEMA_VERSION,
+    });
+    unary_command(req).await
+}
+
+async fn session_restore(
+    id: String,
+    supervisor: Option<String>,
+    reason: Option<String>,
+) -> Result<(), GalleyError> {
+    let req = serde_json::json!({
+        "command": "session.restore",
+        "args": {
+            "sessionId": id,
+            "supervisor": supervisor,
+            "reason": reason,
+        },
+        "schemaVersion": SCHEMA_VERSION,
+    });
+    unary_command(req).await
+}
+
+async fn session_move(
+    id: String,
+    to: Option<String>,
+    supervisor: Option<String>,
+    reason: Option<String>,
+) -> Result<(), GalleyError> {
+    let req = serde_json::json!({
+        "command": "session.move",
+        "args": {
+            "sessionId": id,
+            "to": to,
+            "supervisor": supervisor,
+            "reason": reason,
+        },
+        "schemaVersion": SCHEMA_VERSION,
+    });
+    unary_command(req).await
 }
 
 /// Map a server-side error discriminant tag onto the CLI's typed
