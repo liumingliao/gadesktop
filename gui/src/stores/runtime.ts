@@ -135,7 +135,7 @@ interface RuntimeActions {
    * Spawn a GA bridge subprocess for `args.sessionId`. If that session
    * already has a live bridge, shut it down first. LRU eviction
    * enforced inside this action via the runtime-private
-   * `_bridgeClients` / `_lruOrder` maps (LRU_CAP = 5 active bridges).
+   * `_bridgeClients` / `_lruOrder` maps (LRU_CAP = 20 active bridges).
    */
   spawnBridge: (args: BridgeSpawnArgs) => Promise<void>;
   /** Graceful shutdown. No-op if no bridge alive for `sid`. */
@@ -217,7 +217,7 @@ const _bridgeClients = new Map<string, BridgeClient>();
 const _stderrTails = new Map<string, string[]>();
 const _STDERR_TAIL_MAX = 8;
 const _lruOrder: string[] = [];
-const LRU_CAP = 5;
+const LRU_CAP = 20;
 
 function _lruTouch(sessionId: string): void {
   const idx = _lruOrder.indexOf(sessionId);
